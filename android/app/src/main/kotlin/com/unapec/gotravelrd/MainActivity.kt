@@ -1,4 +1,4 @@
-package com.example.go_travel_rd
+package com.unapec.gotravelrd
 
 import io.flutter.embedding.android.FlutterActivity
 
