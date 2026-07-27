@@ -1,0 +1,46 @@
+Routes
+- id: int, guid, whatever
+- name: string //ej: Linea 1, Teleferico 1, Ruta Kennedy, R 30
+- transportTypeId: id //ej: Metro, Teleferico, concho, microbus
+- province: string //ej: Santo Domingo, San Cristobal
+- days: string[] //ej: mo, tu, we, th, fr, sa, su
+- startTime: time[] //hora diferente por cada dia de la semana ej: 7am, 7am..... 9am, 9am
+- finishTime time[] //igual que anterior, diferente para cada dia, ej: 10pm..... 9pm
+- price: decimal //ej: 35, 20, 50
+- timeByDistance: float //cuanto tarda la ruta en cubrir un km en promedio de minutos, ej: 2min, 1.5min, luego se multiplica y extrapola
+- active: boolean
+
+- startLocation?: lng, lat //solo para rutas que no tengan paradas fijas
+- finishLocation?: lng, lat //solo para rutas que no tengan paradas fijas
+
+- stations?: station[] //en secuencia desde la primera hasta la ultima sin saltos, solo para rutas con paradas
+
+TransportType
+- id: guid
+- name: string //metro, bus, concho, Teleferico
+- picture: string //o alguna referencia a icono o algo parecido
+
+Station
+- id: guid
+- name: string
+- longitude: decimal
+- latitude: decimal
+- routeId: guid[] //rutas que usan esta paradas
+- transportTypeId: guid //solo para la coleccion de estaciones, en la sublista en rutas no lo tendra
+
+User
+- uid: uid
+- email: string
+- name: string
+- favoriteTransportTypeId: id
+- maxWalkDistance: float //en metros
+- routePreference: string //precio, rapidez, distancia
+
+FavoriteCustomRoute //para rutas personalizadas, como Casa-Trabajo
+- id: guid
+- uid: uid
+- name: string //casa-trabajo, viaje al interior, etc
+- startLocation: lng, ltd //donde empieza la ruta
+- finishLocation: lng, ltd //donde termina la ruta
+- preferedTransportTypeId: id //tipo de transporte preferido para la ruta
+

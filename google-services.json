@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "616379006074",
+    "project_id": "gotravel-rd",
+    "storage_bucket": "gotravel-rd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:616379006074:android:8c7c0791423aeacc544fc3",
+        "android_client_info": {
+          "package_name": "com.unapec.gotravelrd"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "616379006074-u37k74oqc8s4ob62bivgq88vm4rm6anp.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.unapec.gotravelrd",
+            "certificate_hash": "8e12d7aefeae97aba09d5427ba9333228f426398"
+          }
+        },
+        {
+          "client_id": "616379006074-l5lm2u4rn8d4fu21f6onek3ehu302kfc.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCxOlcyYINjqN4KxkN5jKDIJiGG_8VdGkg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "616379006074-l5lm2u4rn8d4fu21f6onek3ehu302kfc.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
