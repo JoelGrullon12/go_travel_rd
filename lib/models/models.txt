@@ -23,9 +23,8 @@ TransportType
 Station
 - id: guid
 - name: string
-- longitude: decimal
-- latitude: decimal
-- routeId: guid[] //rutas que usan esta paradas
+- location: Geolocation
+- routeIds: guid[] //rutas que usan esta paradas
 - transportTypeId: guid //solo para la coleccion de estaciones, en la sublista en rutas no lo tendra
 
 User
