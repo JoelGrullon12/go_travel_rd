@@ -1,1 +1,29 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"gotravel-rd","appId":"1:616379006074:android:8c7c0791423aeacc544fc3","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"gotravel-rd","configurations":{"android":"1:616379006074:android:8c7c0791423aeacc544fc3","ios":"1:616379006074:ios:8bf4ae9f894ef69c544fc3","web":"1:616379006074:web:5c4f93a46d373c98544fc3"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "gotravel-rd",
+          "appId": "1:616379006074:android:8c7c0791423aeacc544fc3",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "gotravel-rd",
+          "configurations": {
+            "android": "1:616379006074:android:8c7c0791423aeacc544fc3",
+            "ios": "1:616379006074:ios:8bf4ae9f894ef69c544fc3",
+            "web": "1:616379006074:web:5c4f93a46d373c98544fc3"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "database": "gotravel-rd-db",
+    "location": "northamerica-south1",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}
