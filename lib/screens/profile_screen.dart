@@ -73,8 +73,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             const TextStyle(fontSize: 16, color: Colors.grey),
                       ),
                       const SizedBox(height: 32),
-                      _infoTile('Transporte preferido',
-                          _user!.favoriteTransportTypeId ?? 'No especificado'),
+                      _infoTile(
+                          'Transportes preferidos',
+                          _user!.favoriteTransportTypeIds.isEmpty
+                              ? 'No especificado'
+                              : _user!.favoriteTransportTypeIds.join(', ')),
                       _infoTile('Distancia máxima a pie',
                           '${_user!.maxWalkDistance.toInt()} m'),
                       _infoTile('Preferencia de ruta', _preferenceLabel),
@@ -138,10 +141,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String get _preferenceLabel {
     switch (_user!.routePreference) {
-      case 'precio':
+      case 'price':
         return 'Menor precio';
-      case 'distancia':
+      case 'distance':
         return 'Menor distancia';
+      case 'speed':
+        return 'Más rápida';
       default:
         return 'Más rápida';
     }

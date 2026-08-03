@@ -1,0 +1,36 @@
+Route  # collection: routes
+- name: string                     // "Line 1", "Cable Car 1", "Kennedy Route", "R 30"
+- transportTypeId: string          // ref -> TransportType
+- province: string
+- schedule: array<map>             // [{ day: "mo", startMinutes: 420, finishMinutes: 1320 }, ...]
+- price: decimal
+- avgMinutesPerKm: float
+- active: boolean
+- hasFixedStations: boolean
+- startLocation?: geopoint         // only if hasFixedStations == false
+- finishLocation?: geopoint        // only if hasFixedStations == false
+- stations?: array<map>            // [{ stationId, order, name, location: geopoint }], only if hasFixedStations == true
+
+TransportType  # collection: transportTypes
+- name: string
+- icon: string
+
+Station  # collection: stations
+- name: string
+- location: geopoint
+- transportTypeId: string          // ref -> TransportType
+- routeIds: array<string>          // refs -> Route
+
+User  # collection: users, doc id = Firebase Auth uid
+- email: string
+- name: string
+- favoriteTransportTypeIds: array<string>
+- maxWalkDistance: float
+- routePreference: string          // "price" | "speed" | "distance"
+
+# users/{uid}/favoriteRoutes/{routeId}          -> doc id = routeId itself, body can be empty or { addedAt }
+# users/{uid}/favoriteCustomRoutes/{id}
+- name: string                     // "Home-Work", "Trip to the countryside"
+- startLocation: geopoint
+- finishLocation: geopoint
+- preferredTransportTypeId: string

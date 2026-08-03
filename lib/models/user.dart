@@ -2,7 +2,7 @@ class AppUser {
   final String uid;
   final String email;
   final String name;
-  final String? favoriteTransportTypeId;
+  final List<String> favoriteTransportTypeIds;
   final double maxWalkDistance;
   final String routePreference;
   final String? photoUrl;
@@ -11,9 +11,9 @@ class AppUser {
     required this.uid,
     required this.email,
     required this.name,
-    this.favoriteTransportTypeId,
+    this.favoriteTransportTypeIds = const [],
     this.maxWalkDistance = 500.0,
-    this.routePreference = 'rapidez',
+    this.routePreference = 'speed',
     this.photoUrl,
   });
 
@@ -21,7 +21,7 @@ class AppUser {
         'uid': uid,
         'email': email,
         'name': name,
-        'favoriteTransportTypeId': favoriteTransportTypeId,
+        'favoriteTransportTypeIds': favoriteTransportTypeIds,
         'maxWalkDistance': maxWalkDistance,
         'routePreference': routePreference,
         'photoUrl': photoUrl,
@@ -31,9 +31,10 @@ class AppUser {
         uid: uid,
         email: map['email'] as String? ?? '',
         name: map['name'] as String? ?? '',
-        favoriteTransportTypeId: map['favoriteTransportTypeId'] as String?,
+        favoriteTransportTypeIds:
+            List<String>.from(map['favoriteTransportTypeIds'] as List? ?? []),
         maxWalkDistance: (map['maxWalkDistance'] as num?)?.toDouble() ?? 500.0,
-        routePreference: map['routePreference'] as String? ?? 'rapidez',
+        routePreference: map['routePreference'] as String? ?? 'speed',
         photoUrl: map['photoUrl'] as String?,
       );
 
@@ -41,7 +42,7 @@ class AppUser {
     String? uid,
     String? email,
     String? name,
-    String? favoriteTransportTypeId,
+    List<String>? favoriteTransportTypeIds,
     double? maxWalkDistance,
     String? routePreference,
     String? photoUrl,
@@ -50,8 +51,8 @@ class AppUser {
         uid: uid ?? this.uid,
         email: email ?? this.email,
         name: name ?? this.name,
-        favoriteTransportTypeId:
-            favoriteTransportTypeId ?? this.favoriteTransportTypeId,
+        favoriteTransportTypeIds:
+            favoriteTransportTypeIds ?? this.favoriteTransportTypeIds,
         maxWalkDistance: maxWalkDistance ?? this.maxWalkDistance,
         routePreference: routePreference ?? this.routePreference,
         photoUrl: photoUrl ?? this.photoUrl,
