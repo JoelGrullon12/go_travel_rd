@@ -34,7 +34,7 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  google_maps_flutter: ^2.17.1
+  google_maps_flutter: ^2.18.0
   geolocator: ^14.0.3
   permission_handler: ^12.0.3
   firebase_core: ^4.12.1
@@ -42,6 +42,16 @@ dependencies:
   firebase_auth: ^6.5.6
   google_sign_in: ^7.2.0
   flutter_compass: ^0.8.1
+
+  # Textos de Material en español (diálogos, tooltips, etc.).
+  flutter_localizations:
+    sdk: flutter
+
+  # Estado del viaje en vivo: stream de larga vida leído por varias pantallas.
+  flutter_riverpod: ^2.6.1
+
+  # Formato de fechas/horas en es-DO ("3:42 p. m."). Usado por core/utils/formatters.dart.
+  intl: ^0.20.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -53,6 +63,11 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+  # Mocks de firebase_core para el widget test (setupFirebaseCoreMocks).
+  # Es una dependencia transitiva de firebase_core, pero se importa directo
+  # desde test/widget_test.dart.
+  firebase_core_platform_interface: ^8.0.0
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -63,6 +78,26 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # Fuentes empaquetadas en el binario — nada se descarga en tiempo de
+  # ejecución. SpaceGrotesk para números/datos y Inter para interfaz.
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
+    - family: SpaceGrotesk
+      fonts:
+        - asset: assets/fonts/SpaceGrotesk-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/SpaceGrotesk-Bold.ttf
+          weight: 700
 
   # To add assets to your application, add an assets section, like this:
   # assets:

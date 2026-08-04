@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/theme/app_colors.dart';
+
 /// Caja flotante con los campos de origen y destino, estilo Uber.
 ///
 /// Es un widget "tonto" (dumb widget): no maneja el estado del mapa,
@@ -25,11 +27,12 @@ class SearchBox extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
+            color: Colors.black.withValues(alpha: 0.3),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -42,18 +45,18 @@ class SearchBox extends StatelessWidget {
             controller: originController,
             hintText: '¿Dónde estás?',
             icon: Icons.my_location,
-            iconColor: Colors.blue,
+            iconColor: AppColors.accent,
             onSubmitted: onOriginSubmitted,
           ),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 8),
-            child: Divider(height: 1),
+            child: Divider(height: 1, color: AppColors.border),
           ),
           _SearchField(
             controller: destinationController,
             hintText: '¿A dónde vas?',
             icon: Icons.location_on,
-            iconColor: Colors.black87,
+            iconColor: AppColors.textSecondary,
             onSubmitted: onDestinationSubmitted,
           ),
         ],
@@ -90,8 +93,11 @@ class _SearchField extends StatelessWidget {
             controller: controller,
             textInputAction: TextInputAction.search,
             onSubmitted: onSubmitted,
+            cursorColor: AppColors.accent,
+            style: const TextStyle(color: AppColors.textPrimary),
             decoration: InputDecoration(
               hintText: hintText,
+              hintStyle: const TextStyle(color: AppColors.textTertiary),
               border: InputBorder.none,
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(vertical: 12),

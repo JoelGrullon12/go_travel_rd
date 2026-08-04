@@ -8,6 +8,10 @@ import 'package:flutter_compass/flutter_compass.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+import '../domain/models/trip_plan.dart';
+import '../features/live_trip/live_trip_screen.dart';
+import '../features/live_trip/widgets/map_style.dart';
+import '../features/shared/mode_visuals.dart';
 import '../models/station.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
@@ -15,6 +19,9 @@ import '../services/station_service.dart';
 import '../widgets/search_box.dart';
 import 'login_screen.dart';
 import 'profile_screen.dart';
+
+import '../core/theme/app_colors.dart';
+import '../core/utils/formatters.dart';
 
 /// Pantalla principal: mapa a pantalla completa + buscador flotante
 /// estilo Uber + estaciones de Firestore + acceso al perfil.
@@ -28,7 +35,23 @@ import 'profile_screen.dart';
 /// denegado, se usa [_defaultLocation] (Santo Domingo) como fallback
 /// para que la app siga funcionando.
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  const MapScreen({
+    super.key,
+    this.plan,
+    this.initialOrigin = '',
+    this.initialDestination = '',
+  });
+
+  /// Plan de viaje ya resuelto (viene del Hito 4 / demo del Hito 2).
+  ///
+  /// Cuando se pasa, el mapa dibuja la ruta del plan y muestra la barra
+  /// inferior con el botón "Iniciar Viaje". Sin plan, el mapa conserva el
+  /// comportamiento de exploración (búsqueda libre + marcadores).
+  final TripPlan? plan;
+
+  /// Textos con los que se pre-llenan los campos de origen y destino.
+  final String initialOrigin;
+  final String initialDestination;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -96,6 +119,10 @@ class _MapScreenState extends State<MapScreen> {
   /// lista de puntos que devuelva ese cálculo.
   final Set<Polyline> _polylines = {};
 
+  /// Plan activo (cuando se abrió el mapa desde una ruta favorita o demo).
+  /// Su presencia activa la barra inferior con el botón "Iniciar Viaje".
+  TripPlan? _activePlan;
+
   @override
   void initState() {
     super.initState();
@@ -110,6 +137,18 @@ class _MapScreenState extends State<MapScreen> {
     _startLocationTracking();
     _initLocationIndicator();
     _startCompassTracking();
+
+    // Plan recibido desde la pantalla de inicio: se pre-llenan los campos,
+    // se dibuja la ruta y se habilita "Iniciar Viaje".
+    if (widget.initialOrigin.isNotEmpty) {
+      origin = widget.initialOrigin;
+      _originController.text = widget.initialOrigin;
+    }
+    if (widget.initialDestination.isNotEmpty) {
+      destination = widget.initialDestination;
+      _destinationController.text = widget.initialDestination;
+    }
+    if (widget.plan != null) _activatePlan(widget.plan!);
   }
 
   @override
@@ -250,6 +289,84 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _markers.addAll(stations.map(_buildStationMarker));
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // Plan de viaje activo
+  // ---------------------------------------------------------------------
+
+  /// Activa un plan: dibuja su ruta y sus extremos sobre el mapa y guarda
+  /// el plan para habilitar el botón "Iniciar Viaje".
+  ///
+  /// Mientras no exista el motor del Hito 2, el plan llega de la pantalla
+  /// de inicio (rutas demo). Cuando el motor exista, este mismo código
+  /// dibuja lo que devuelva el cálculo — solo cambia el origen del plan.
+  void _activatePlan(TripPlan plan) {
+    setState(() {
+      _activePlan = plan;
+
+      _polylines.clear();
+      for (int i = 0; i < plan.legs.length; i++) {
+        final leg = plan.legs[i];
+        _polylines.add(
+          Polyline(
+            polylineId: PolylineId('plan-leg-$i'),
+            points: leg.path.map((p) => p.toLatLng).toList(),
+            color: Color(leg.lineColorHex),
+            width: leg.mode.isWalking ? 5 : 8,
+            patterns: leg.mode.isWalking
+                ? <PatternItem>[PatternItem.dot, PatternItem.gap(14)]
+                : const <PatternItem>[],
+            startCap: Cap.roundCap,
+            endCap: Cap.roundCap,
+            jointType: JointType.round,
+            zIndex: 1,
+          ),
+        );
+      }
+
+      _markers.removeWhere(
+        (m) =>
+            m.markerId == const MarkerId('plan-origin') ||
+            m.markerId == const MarkerId('plan-destination'),
+      );
+      _markers.add(
+        Marker(
+          markerId: const MarkerId('plan-origin'),
+          position: plan.origin.toLatLng,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueGreen,
+          ),
+          infoWindow: InfoWindow(title: plan.originName, snippet: 'Origen'),
+        ),
+      );
+      _markers.add(
+        Marker(
+          markerId: const MarkerId('plan-destination'),
+          position: plan.destination.toLatLng,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueRed,
+          ),
+          infoWindow:
+              InfoWindow(title: plan.destinationName, snippet: 'Destino'),
+        ),
+      );
+    });
+
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLngZoom(plan.origin.toLatLng, 14),
+    );
+  }
+
+  void _startTrip() {
+    final plan = _activePlan;
+    if (plan == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => LiveTripScreen(planId: plan.id),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------
@@ -398,6 +515,10 @@ class _MapScreenState extends State<MapScreen> {
         children: [
           GoogleMap(
             initialCameraPosition: _initialCameraPosition,
+            // Mismo estilo oscuro que el mapa del viaje activo (kDarkMapStyle):
+            // calles apagadas para que lo único brillante sea la ruta y la
+            // posición del usuario.
+            style: kDarkMapStyle,
             markers: _markers,
             polylines: _polylines,
             myLocationEnabled: true,
@@ -434,14 +555,33 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
           ),
+          if (_activePlan != null)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16 + MediaQuery.paddingOf(context).bottom,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _MyLocationFab(
+                      onPressed: _onLocationButtonPressed,
+                    ),
+                  ),
+                  _StartTripBar(
+                    plan: _activePlan!,
+                    onStart: _startTrip,
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _onLocationButtonPressed,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        child: const Icon(Icons.my_location),
-      ),
+      floatingActionButton: _activePlan == null
+          ? _MyLocationFab(onPressed: _onLocationButtonPressed)
+          : null,
     );
   }
 
@@ -471,6 +611,106 @@ class _MapScreenState extends State<MapScreen> {
                   )
                 : null,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Botón flotante "mi ubicación", en tema oscuro.
+///
+/// Vive en dos sitios según el contexto:
+/// · sin plan activo, como `floatingActionButton` del `Scaffold` (posicionado
+///   automáticamente sobre la barra de navegación);
+/// · con plan activo, dentro de la columna inferior, encima de "Iniciar Viaje",
+///   para no tapar la barra sin importar su altura.
+class _MyLocationFab extends StatelessWidget {
+  const _MyLocationFab({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => FloatingActionButton(
+        onPressed: onPressed,
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.accent,
+        elevation: 6,
+        highlightElevation: 3,
+        shape: const CircleBorder(
+          side: BorderSide(color: AppColors.borderStrong),
+        ),
+        child: const Icon(Icons.my_location),
+      );
+}
+
+/// Barra inferior estilo Google Maps: resumen de la ruta + botón
+/// "Iniciar Viaje". Solo aparece cuando hay un plan activo en el mapa.
+class _StartTripBar extends StatelessWidget {
+  const _StartTripBar({required this.plan, required this.onStart});
+
+  final TripPlan plan;
+  final VoidCallback onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextTheme text = Theme.of(context).textTheme;
+    final String transfers = plan.transferCount == 0
+        ? 'Directo'
+        : '${plan.transferCount} transbordo${plan.transferCount == 1 ? '' : 's'}';
+
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(18),
+      elevation: 8,
+      shadowColor: Colors.black,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Icon(Icons.alt_route_rounded,
+                    size: 20, color: AppColors.accent),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        plan.originName,
+                        style: text.titleMedium,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        plan.destinationName,
+                        style: text.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${Fmt.distance(plan.totalDistanceMeters)} · '
+              '${Fmt.money(plan.totalFareDop)} · $transfers',
+              style: text.bodySmall?.copyWith(color: AppColors.textTertiary),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: onStart,
+              icon: const Icon(Icons.play_arrow_rounded, size: 18),
+              label: const Text('Iniciar Viaje'),
+            ),
+          ],
         ),
       ),
     );

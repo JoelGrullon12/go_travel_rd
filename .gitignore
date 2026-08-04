@@ -46,3 +46,6 @@ app.*.map.json
 
 AGENTS.md 
 .external-advancements/
+
+# API key de Maps para web (ver web/maps_config.example.js)
+web/maps_config.js

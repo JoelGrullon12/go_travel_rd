@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/theme/app_colors.dart';
 import '../models/user.dart';
 import '../services/auth_service.dart';
 import 'login_screen.dart';
@@ -38,16 +39,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mi Perfil'),
-        backgroundColor: Colors.green[700],
-        foregroundColor: Colors.white,
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _user == null
               ? const Center(child: Text('No se pudo cargar el perfil'))
-              : Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
+              : SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
                     children: [
                       CircleAvatar(
                         radius: 50,
@@ -69,8 +70,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 8),
                       Text(
                         _user!.email,
-                        style:
-                            const TextStyle(fontSize: 16, color: Colors.grey),
+                        style: const TextStyle(
+                            fontSize: 16, color: AppColors.textSecondary),
                       ),
                       const SizedBox(height: 32),
                       _infoTile(
@@ -85,14 +86,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       SizedBox(
                         width: double.infinity,
                         height: 48,
-                        child: ElevatedButton(
+                        child: FilledButton(
                           onPressed: () {},
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green[700],
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text('Editar Perfil',
-                              style: TextStyle(fontSize: 16)),
+                          child: const Text('Editar Perfil'),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -116,6 +112,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                 ),
+              ),
     );
   }
 
@@ -126,8 +123,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           Expanded(
             child: Text(label,
-                style:
-                    const TextStyle(fontSize: 14, color: Colors.grey)),
+                style: const TextStyle(
+                    fontSize: 14, color: AppColors.textSecondary)),
           ),
           Expanded(
             child: Text(value,

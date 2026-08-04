@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../core/theme/app_colors.dart';
 import '../services/auth_service.dart';
 import 'register_screen.dart';
 import 'map_screen.dart';
@@ -89,8 +90,6 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Iniciar Sesión'),
-        backgroundColor: Colors.green[700],
-        foregroundColor: Colors.white,
       ),
       body: Center(
         child: SingleChildScrollView(
@@ -126,23 +125,18 @@ class _LoginScreenState extends State<LoginScreen> {
               SizedBox(
                 width: double.infinity,
                 height: 48,
-                child: ElevatedButton(
+                child: FilledButton(
                   onPressed: _loading ? null : _signIn,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green[700],
-                    foregroundColor: Colors.white,
-                  ),
                   child: _loading
                       ? const SizedBox(
                           height: 20,
                           width: 20,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.white,
+                            color: AppColors.textPrimary,
                           ),
                         )
-                      : const Text('Iniciar Sesión',
-                          style: TextStyle(fontSize: 16)),
+                      : const Text('Iniciar Sesión'),
                 ),
               ),
               const SizedBox(height: 12),
