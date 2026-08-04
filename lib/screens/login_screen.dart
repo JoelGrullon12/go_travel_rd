@@ -2,7 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import 'register_screen.dart';
-import 'mapa_screen.dart';
+import 'map_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -34,7 +34,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const MapaScreen()),
+          MaterialPageRoute(builder: (_) => const MapScreen()),
         );
       }
     } on FirebaseAuthException catch (e) {
@@ -55,7 +55,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (user != null && mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const MapaScreen()),
+          MaterialPageRoute(builder: (_) => const MapScreen()),
         );
       }
     } on FirebaseAuthException catch (e) {
