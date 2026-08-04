@@ -79,6 +79,10 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # Iconos de estaciones por tipo de transporte (metro, OMSA…).
+  assets:
+    - assets/icons/
+
   # Fuentes empaquetadas en el binario — nada se descarga en tiempo de
   # ejecución. SpaceGrotesk para números/datos y Inter para interfaz.
   fonts:

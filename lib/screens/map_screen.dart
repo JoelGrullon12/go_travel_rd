@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_compass/flutter_compass.dart';
@@ -12,6 +13,7 @@ import '../domain/models/trip_plan.dart';
 import '../features/live_trip/live_trip_screen.dart';
 import '../features/live_trip/widgets/map_style.dart';
 import '../features/shared/mode_visuals.dart';
+import '../features/shared/station_visuals.dart';
 import '../models/station.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
@@ -113,6 +115,29 @@ class _MapScreenState extends State<MapScreen> {
 
   final Set<Marker> _markers = {};
 
+  /// Iconos de estación por tipo de transporte y tamaño (`'$type@$size'`),
+  /// para reutilizarlos entre las estaciones en vez de decodificar el PNG
+  /// una vez por marcador o en cada frame del gesto de zoom.
+  final Map<String, BitmapDescriptor> _stationTypeIcons = {};
+
+  /// Último zoom conocido de la cámara (se actualiza en `onCameraMove`,
+  /// barato). Se usa cuando el usuario suelta el mapa (`onCameraIdle`).
+  double _lastZoom = 14;
+
+  /// Token para descartar renders de estaciones obsoletos: si el usuario
+  /// vuelve a mover el mapa mientras se dibuja, solo gana el último.
+  int _renderToken = 0;
+
+  /// Última zona consultada a Firestore + sus estaciones, para reutilizarla
+  /// cuando el viewport nuevo cae dentro de esta zona (sin re-consultar).
+  LatLngBounds? _cachedBounds;
+  List<Station> _cachedStations = const [];
+
+  /// Última zona/bucket ya renderizados, para saltar renders redundantes
+  /// cuando el usuario suelta el mapa sin haber cambiado nada.
+  LatLngBounds? _lastRenderedBounds;
+  int _lastRenderedBucket = -1;
+
   /// Preparado para dibujar rutas más adelante (Hito 2/3, ver
   /// AGENTS.md). Por ahora queda vacío; cuando exista un motor de
   /// cálculo de ruta, se llenaría con un `Polyline` a partir de la
@@ -133,7 +158,6 @@ class _MapScreenState extends State<MapScreen> {
     _markers.add(_buildOriginMarker(_defaultLocation));
     origin = 'Mi ubicación actual';
     _originController.text = origin;
-    _loadStations();
     _startLocationTracking();
     _initLocationIndicator();
     _startCompassTracking();
@@ -280,15 +304,169 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   // ---------------------------------------------------------------------
-  // Carga de estaciones
+  // Estaciones según el zoom y el viewport
   // ---------------------------------------------------------------------
 
-  Future<void> _loadStations() async {
-    final stations = await _stationService.getStationsOnce();
+  /// Bucket de zoom en el que están las estaciones. Al cruzar de un bucket
+  /// a otro se reconstruyen los markers con el nuevo tamaño/visibilidad.
+  ///
+  /// Límites: 14 (detalle), 12 (ciudad), 10.5 (región). Por debajo de 10.5
+  /// desaparecen todas las estaciones.
+  int _stationZoomBucket(double zoom) {
+    if (zoom >= 14) return 3;
+    if (zoom >= 12) return 2;
+    if (zoom >= 10.5) return 1;
+    return 0;
+  }
+
+  /// Tamaño (px) del icono de estación para un tipo en un bucket de zoom.
+  /// `null` = el tipo se oculta en ese bucket.
+  ///
+  /// OMSA desaparece antes que el resto (bajo zoom 12): son las más densas
+  /// (~450 estaciones), las que más se apiñan al alejarse.
+  double? _stationIconSize(String type, int bucket) {
+    final bool isOmsa = type == 'omsa';
+    if (isOmsa && bucket < 2) return null;
+    if (bucket < 1) return null;
+    return switch (bucket) {
+      1 => 10,
+      2 => 14,
+      _ => 20,
+    };
+  }
+
+  /// Se ejecuta cuando el usuario suelta el mapa (`onCameraIdle`): calcula el
+  /// bucket, consulta a Firestore solo las estaciones del viewport (con cache
+  /// en memoria) y las dibuja en lotes, sin bloquear la UI.
+  Future<void> _onCameraIdle() async {
+    final GoogleMapController? controller = _mapController;
+    if (controller == null) return;
+
+    final int bucket = _stationZoomBucket(_lastZoom);
+    if (bucket == 0) {
+      _removeStationMarkers();
+      _lastRenderedBucket = 0;
+      _lastRenderedBounds = null;
+      return;
+    }
+
+    final LatLngBounds? bounds = await _visibleRegion(controller);
+    if (bounds == null || !mounted) return;
+
+    // Sin cambios desde el último render → no hacer nada.
+    if (bucket == _lastRenderedBucket && _boundsContains(_lastRenderedBounds, bounds)) {
+      return;
+    }
+
+    final int request = ++_renderToken;
+
+    final List<Station> stations = await _stationsForBounds(bounds);
+    if (!mounted || request != _renderToken) return;
+
+    final double size = _stationIconSize('metro', bucket)!;
+    final List<Station> visible = stations
+        .where((Station s) => _stationIconSize(s.transportTypeId ?? '', bucket) != null)
+        .toList();
+
+    await _loadStationTypeIcons(visible, size);
+    if (!mounted || request != _renderToken) return;
+
+    _lastRenderedBounds = bounds;
+    _lastRenderedBucket = bucket;
+    await _renderStationMarkersInChunks(visible, size, request);
+  }
+
+  /// Devuelve el rectángulo visible del mapa, o `null` si no se puede obtener.
+  Future<LatLngBounds?> _visibleRegion(GoogleMapController controller) async {
+    try {
+      return await controller.getVisibleRegion();
+    } on Exception {
+      return null;
+    }
+  }
+
+  /// Devuelve las estaciones del viewport, reutilizando la zona cacheada si
+  /// el viewport cae dentro de ella (para no re-consultar al panear).
+  Future<List<Station>> _stationsForBounds(LatLngBounds bounds) async {
+    final LatLngBounds? cached = _cachedBounds;
+    if (cached != null && _boundsContains(cached, bounds)) {
+      return _cachedStations;
+    }
+    final List<Station> stations = await _stationService.getStationsInBounds(
+      southWest: GeoPoint(bounds.southwest.latitude, bounds.southwest.longitude),
+      northEast: GeoPoint(bounds.northeast.latitude, bounds.northeast.longitude),
+    );
+    _cachedBounds = bounds;
+    _cachedStations = stations;
+    return stations;
+  }
+
+  /// `true` si `inner` está completamente dentro de `outer` (con margen de
+  /// 1% para evitar re-renders por diferencias de redondeo).
+  bool _boundsContains(LatLngBounds? outer, LatLngBounds inner) {
+    if (outer == null) return false;
+    const double margin = 0.01;
+    return inner.southwest.latitude >= outer.southwest.latitude * (1 - margin) &&
+        inner.northeast.latitude <= outer.northeast.latitude * (1 + margin) &&
+        inner.southwest.longitude >= outer.southwest.longitude * (1 - margin) &&
+        inner.northeast.longitude <= outer.northeast.longitude * (1 + margin);
+  }
+
+  /// Elimina los markers de estación (`station-*`) del mapa.
+  void _removeStationMarkers() {
     if (!mounted) return;
     setState(() {
-      _markers.addAll(stations.map(_buildStationMarker));
+      _markers.removeWhere(
+        (Marker m) => m.markerId.value.startsWith('station-'),
+      );
     });
+  }
+
+  /// Dibuja los markers de estación en lotes (~50 por frame) para no
+  /// congelar la UI. Cada lote verifica que el render siga vigente; si el
+  /// usuario movió el mapa, se descarta y gana el nuevo.
+  Future<void> _renderStationMarkersInChunks(
+    List<Station> stations,
+    double size,
+    int request,
+  ) async {
+    const int chunkSize = 50;
+    _removeStationMarkers();
+    for (int i = 0; i < stations.length; i += chunkSize) {
+      if (!mounted || request != _renderToken) return;
+      final int end = (i + chunkSize < stations.length)
+          ? i + chunkSize
+          : stations.length;
+      setState(() {
+        _markers.addAll(
+          stations.sublist(i, end).map((Station s) => _buildStationMarker(s, size)),
+        );
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+  }
+
+  /// Carga un `BitmapDescriptor` por cada `transportTypeId` presente que
+  /// tenga asset propio (ver [stationIconAsset]). Los tipos sin icono se
+  /// dejan fuera: sus marcadores usan el pin por defecto.
+  Future<void> _loadStationTypeIcons(List<Station> stations, double size) async {
+    final types = stations
+        .map((Station s) => s.transportTypeId)
+        .whereType<String>()
+        .toSet();
+    for (final type in types) {
+      final asset = stationIconAsset(type);
+      if (asset == null) continue;
+      final String key = '$type@$size';
+      if (_stationTypeIcons.containsKey(key)) continue;
+      final icon = await BitmapDescriptor.asset(
+        ImageConfiguration(size: const Size(40, 40)),
+        asset,
+        width: size,
+        height: size,
+      );
+      _stationTypeIcons[key] = icon;
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -373,10 +551,15 @@ class _MapScreenState extends State<MapScreen> {
   // Helpers de marcadores
   // ---------------------------------------------------------------------
 
-  Marker _buildStationMarker(Station station) {
+  Marker _buildStationMarker(Station station, double size) {
+    final String? type = station.transportTypeId;
+    final String? key = type == null ? null : '$type@$size';
     return Marker(
       markerId: MarkerId('station-${station.id}'),
       position: LatLng(station.location.latitude, station.location.longitude),
+      icon: key != null && _stationTypeIcons.containsKey(key)
+          ? _stationTypeIcons[key]!
+          : BitmapDescriptor.defaultMarker,
       infoWindow: InfoWindow(title: station.name),
     );
   }
@@ -533,7 +716,17 @@ class _MapScreenState extends State<MapScreen> {
                   CameraUpdate.newLatLngZoom(current, 16),
                 );
               }
+              // Red de seguridad: en algunas plataformas el `onCameraIdle`
+              // inicial no dispara solo; se programa un primer render.
+              Future<void>.delayed(
+                const Duration(milliseconds: 400),
+                _onCameraIdle,
+              );
             },
+            onCameraMove: (CameraPosition position) {
+              _lastZoom = position.zoom;
+            },
+            onCameraIdle: _onCameraIdle,
           ),
           SafeArea(
             child: Padding(

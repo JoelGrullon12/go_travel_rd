@@ -123,6 +123,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               onOriginSubmitted: (_) => _openMap(),
               onDestinationSubmitted: (_) => _openMap(),
             ),
+            const SizedBox(height: Spacing.md),
+
+            // ── Ver todas las estaciones en el mapa ───────────────────────
+            OutlinedButton.icon(
+              onPressed: _openMap,
+              icon: const Icon(Icons.map_rounded, size: 18),
+              label: const Text('Ver Mapa'),
+            ),
             const SizedBox(height: Spacing.xxl),
 
             // ── Rutas favoritas ────────────────────────────────────────────
