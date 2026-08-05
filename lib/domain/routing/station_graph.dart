@@ -7,28 +7,40 @@ import '../geo/geo_math.dart';
 import '../geo/geo_point.dart';
 import '../models/transport_mode.dart';
 
+/// Distancia máxima a pie (metros) para sugerir un transbordo entre
+/// estaciones de rutas distintas (ej. Metro ↔ OMSA, que no comparten ids de
+/// parada). Por encima de esto no se sugiere el trasbordo y el plan se
+/// considera no conectado.
+///
+/// Es la misma cota que usa `InstructionEngine` para anunciar "bájate:
+/// transbordo a X" ([kTransferWalkMeters]).
+const double kTransferWalkMeters = 400;
+
+/// Id sentinela de las aristas de transbordo a pie dentro del grafo.
+///
+/// No es una ruta real de Firestore: `RouteEngine._buildTransitPlan` lo
+/// interpreta como "caminata entre dos estaciones" y emite un tramo a pie
+/// con distancia real, en vez de un tramo de vehículo.
+const String kTransferRouteId = '__walk_transfer__';
+
 /// Mapea el `transportTypeId` de Firestore a un [TransportMode].
 ///
 /// Los ids del backend son estables (AGENTS.md §9.4: `"metro"` / `"omsa"`).
 /// Tipos desconocidos caen a [TransportMode.concho], el transporte informal
 /// genérico, para que el plan siga siendo navegable.
 TransportMode transportModeForTypeId(String typeId) => switch (typeId) {
-      'metro' => TransportMode.metro,
-      'teleferico' => TransportMode.teleferico,
-      'corredor' => TransportMode.corredor,
-      'omsa' => TransportMode.omsa,
-      'concho' => TransportMode.concho,
-      'motoconcho' => TransportMode.motoconcho,
-      _ => TransportMode.concho,
-    };
+  'metro' => TransportMode.metro,
+  'teleferico' => TransportMode.teleferico,
+  'corredor' => TransportMode.corredor,
+  'omsa' => TransportMode.omsa,
+  'concho' => TransportMode.concho,
+  'motoconcho' => TransportMode.motoconcho,
+  _ => TransportMode.concho,
+};
 
 /// Nodo del grafo: una estación única (por su `stationId` en Firestore).
 class GraphNode {
-  GraphNode({
-    required this.id,
-    required this.name,
-    required this.position,
-  });
+  GraphNode({required this.id, required this.name, required this.position});
 
   final String id;
   final String name;
@@ -73,6 +85,22 @@ class PathResult {
   final double totalMinutes;
 }
 
+/// Resultado de un Dijkstra multi-fuente: la distancia mínima a **cada** nodo
+/// del grafo y la arista por la que se llegó mejor a cada uno.
+///
+/// Se construye una sola vez por búsqueda; [StationGraph.pathTo] reconstruye
+/// un [PathResult] concreto para el destino elegido.
+class DijkstraResult {
+  DijkstraResult(this.dist, this.prevEdge);
+
+  /// Mejor costo (minutos) desde cualquiera de los orígenes hasta el nodo.
+  final Map<String, double> dist;
+
+  /// Arista que produjo el mejor costo a cada nodo. Los orígenes no aparecen
+  /// (no se "llegó" a ellos a través de ninguna arista).
+  final Map<String, GraphEdge> prevEdge;
+}
+
 /// Grafo de transporte construido desde las rutas de Firestore.
 ///
 /// Nodos = estaciones únicas (por `stationId`). Aristas = pares de estaciones
@@ -94,9 +122,11 @@ class StationGraph {
         ..sort((RouteStation a, RouteStation b) => a.order.compareTo(b.order));
 
       for (final RouteStation station in ordered) {
-        _nodeFor(station.stationId, station.name, _domainPoint(station.location))
-            .routeIds
-            .add(route.id);
+        _nodeFor(
+          station.stationId,
+          station.name,
+          _domainPoint(station.location),
+        ).routeIds.add(route.id);
       }
 
       for (int i = 0; i < ordered.length - 1; i++) {
@@ -107,6 +137,8 @@ class StationGraph {
         _addEdge(b.stationId, a.stationId, route.id, minutes);
       }
     }
+
+    _addTransferEdges();
   }
 
   final Map<String, GraphNode> _nodes = <String, GraphNode>{};
@@ -131,40 +163,36 @@ class StationGraph {
     return <GraphNode>[for (final (node, _) in within) node];
   }
 
-  /// Camino más corto (Dijkstra, por minutos) entre dos estaciones, o `null`
-  /// si no hay conexión. La estación de transbordo —un nodo que pertenece a
-  /// más de una ruta— es donde el camino cambia de ruta.
-  PathResult? shortestPath(String fromId, String toId) {
-    if (fromId == toId) {
-      return PathResult(nodeIds: <String>[fromId], edges: const <GraphEdge>[], totalMinutes: 0);
-    }
-
-    final Map<String, double> dist = <String, double>{fromId: 0};
+  /// Dijkstra **multi-fuente**: distancia mínima a todos los nodos partiendo
+  /// de varios orígenes a la vez, cada uno con su costo acumulado inicial
+  /// (ej. los minutos de caminata desde el punto A a cada estación de abordaje).
+  ///
+  /// Es el núcleo del motor A→B: con UNA pasada se obtiene el mejor camino a
+  /// todos los destinos posibles, en vez de correr un Dijkstra por cada par
+  /// (abordaje × bajada). Complejidad O((V+E) log V).
+  ///
+  /// Si un nodo aparece en varias fuentes, gana la de menor costo inicial.
+  DijkstraResult dijkstraFrom(Iterable<(String, double)> starts) {
+    final Map<String, double> dist = <String, double>{};
     final Map<String, GraphEdge> prevEdge = <String, GraphEdge>{};
-    final SplayTreeMap<double, List<String>> queue = SplayTreeMap<double, List<String>>();
-    queue[0] = <String>[fromId];
+    final SplayTreeMap<double, List<String>> queue =
+        SplayTreeMap<double, List<String>>();
+
+    for (final (String nodeId, double minutes) in starts) {
+      final double? old = dist[nodeId];
+      if (old != null && old <= minutes) continue;
+      dist[nodeId] = minutes;
+      queue.putIfAbsent(minutes, () => <String>[]).add(nodeId);
+    }
 
     while (queue.isNotEmpty) {
       final double d = queue.firstKey()!;
       final List<String> nodes = queue.remove(d)!;
       for (final String nodeId in nodes) {
         if (d != dist[nodeId]) continue; // entrada obsoleta del heap
-        if (nodeId == toId) {
-          final List<String> ids = <String>[toId];
-          final List<GraphEdge> edges = <GraphEdge>[];
-          while (ids.last != fromId) {
-            final GraphEdge edge = prevEdge[ids.last]!;
-            edges.add(edge);
-            ids.add(edge.fromId);
-          }
-          return PathResult(
-            nodeIds: ids.reversed.toList(growable: false),
-            edges: edges.reversed.toList(growable: false),
-            totalMinutes: d,
-          );
-        }
 
-        for (final GraphEdge edge in _adjacency[nodeId] ?? const <GraphEdge>[]) {
+        for (final GraphEdge edge
+            in _adjacency[nodeId] ?? const <GraphEdge>[]) {
           final double nd = d + edge.minutes;
           final double? old = dist[edge.toId];
           if (old != null && old <= nd) continue;
@@ -174,14 +202,69 @@ class StationGraph {
         }
       }
     }
-    return null;
+
+    return DijkstraResult(dist, prevEdge);
+  }
+
+  /// Reconstruye el camino (nodos + aristas + minutos totales) hacia `target`
+  /// desde un resultado de [dijkstraFrom]. `null` si `target` es inalcanzable.
+  ///
+  /// Un destino que coincide con un origen (sin `prevEdge`, es decir "subir y
+  /// bajar en la misma estación") devuelve un camino de un solo nodo; el motor
+  /// decide si le sirve.
+  PathResult? pathTo(DijkstraResult result, String target) {
+    final double? total = result.dist[target];
+    if (total == null) return null;
+
+    final List<String> ids = <String>[target];
+    final List<GraphEdge> edges = <GraphEdge>[];
+    while (result.prevEdge.containsKey(ids.last)) {
+      final GraphEdge edge = result.prevEdge[ids.last]!;
+      edges.add(edge);
+      ids.add(edge.fromId);
+    }
+    return PathResult(
+      nodeIds: ids.reversed.toList(growable: false),
+      edges: edges.reversed.toList(growable: false),
+      totalMinutes: total,
+    );
   }
 
   GraphNode _nodeFor(String id, String name, GeoPoint position) => _nodes
       .putIfAbsent(id, () => GraphNode(id: id, name: name, position: position));
 
+  /// Añade aristas de transbordo a pie entre estaciones de rutas **distintas**
+  /// que estén a menos de [kTransferWalkMeters].
+  ///
+  /// Sin esto, OMSA y Metro —que no comparten ids de parada— nunca se
+  /// conectarían y cualquier par origen/destino que mezclara sistemas daría
+  /// `noRoute`. Con estas aristas, Dijkstra encuentra el trasbordo y el plan
+  /// suma un pasaje más (cada tramo de transporte cobra su tarifa).
+  ///
+  /// Se omiten los pares que ya comparten una ruta: ya están conectados por el
+  /// servicio y una caminata entre ellos nunca sería más rápida.
+  void _addTransferEdges() {
+    final List<GraphNode> nodes = _nodes.values.toList(growable: false);
+    for (int i = 0; i < nodes.length; i++) {
+      for (int j = i + 1; j < nodes.length; j++) {
+        final GraphNode a = nodes[i];
+        final GraphNode b = nodes[j];
+        if (a.routeIds.any(b.routeIds.contains)) continue;
+
+        final double meters = distanceMeters(a.position, b.position);
+        if (meters > kTransferWalkMeters) continue;
+
+        final double minutes = _walkMinutes(meters);
+        _addEdge(a.id, b.id, kTransferRouteId, minutes);
+        _addEdge(b.id, a.id, kTransferRouteId, minutes);
+      }
+    }
+  }
+
   void _addEdge(String fromId, String toId, String routeId, double minutes) {
-    _adjacency.putIfAbsent(fromId, () => <GraphEdge>[]).add(
+    _adjacency
+        .putIfAbsent(fromId, () => <GraphEdge>[])
+        .add(
           GraphEdge(
             fromId: fromId,
             toId: toId,
@@ -190,6 +273,9 @@ class StationGraph {
           ),
         );
   }
+
+  static double _walkMinutes(double meters) =>
+      meters / TransportMode.walk.averageSpeedMps / 60.0;
 
   static GeoPoint _domainPoint(fs.GeoPoint cloud) =>
       GeoPoint(cloud.latitude, cloud.longitude);

@@ -60,9 +60,15 @@ class RoutePlanOutcome {
 ///
 /// ## Cómo busca
 /// 1. Estaciones alcanzables a pie (≤ `maxWalkMeters`) desde origen y destino.
-/// 2. Por cada par (abordaje, bajada), Dijkstra sobre el [StationGraph].
-/// 3. Gana el plan de menor costo. Los transbordos —caminatas cortas en una
-///    estación compartida por dos rutas— se suman como tramos a pie.
+/// 2. Un solo **Dijkstra multi-fuente** sobre el [StationGraph], arrancando de
+///    una fuente virtual conectada a cada estación de abordaje (peso = caminata
+///    desde el origen). Así se obtiene el mejor tiempo a **todos** los destinos
+///    en una pasada —O((V+E) log V)— en vez de correr un Dijkstra por cada par
+///    (abordaje × bajada), que con distancia a pie ∞ disparaba B×A ejecuciones
+///    y congelaba la UI.
+/// 3. Gana el mejor destino de bajada. Los transbordos —caminatas cortas entre
+///    estaciones cercanas o el pasillo de una estación compartida— se suman
+///    como tramos a pie dentro del grafo.
 /// 4. Si origen y destino están lo bastante cerca, caminar directo compite con
 ///    el transporte y puede ganarle.
 class RouteEngine {
@@ -75,10 +81,10 @@ class RouteEngine {
     required double maxWalkMeters,
   }) {
     final List<Route> fixedRoutes = routes
-        .where((Route r) =>
-            r.active &&
-            r.hasFixedStations &&
-            (r.stations?.length ?? 0) >= 2)
+        .where(
+          (Route r) =>
+              r.active && r.hasFixedStations && (r.stations?.length ?? 0) >= 2,
+        )
         .toList(growable: false);
     if (fixedRoutes.isEmpty) {
       return const RoutePlanOutcome.failure(RoutePlanFailure.noRoute);
@@ -86,15 +92,34 @@ class RouteEngine {
 
     final StationGraph graph = StationGraph.build(fixedRoutes);
 
-    final List<GraphNode> boardCandidates = graph.nodesWithin(origin, maxWalkMeters);
+    final List<GraphNode> boardCandidates = graph.nodesWithin(
+      origin,
+      maxWalkMeters,
+    );
     if (boardCandidates.isEmpty) {
-      return const RoutePlanOutcome.failure(RoutePlanFailure.noStationsNearOrigin);
+      return const RoutePlanOutcome.failure(
+        RoutePlanFailure.noStationsNearOrigin,
+      );
     }
-    final List<GraphNode> alightCandidates =
-        graph.nodesWithin(destination, maxWalkMeters);
+    final List<GraphNode> alightCandidates = graph.nodesWithin(
+      destination,
+      maxWalkMeters,
+    );
     if (alightCandidates.isEmpty) {
-      return const RoutePlanOutcome.failure(RoutePlanFailure.noStationsNearDestination);
+      return const RoutePlanOutcome.failure(
+        RoutePlanFailure.noStationsNearDestination,
+      );
     }
+
+    // Dijkstra multi-fuente: una sola pasada desde una fuente virtual conectada
+    // a cada estación de abordaje (peso = minutos caminando desde el origen).
+    // `dist[alight]` queda = min sobre los abordajes de (caminata + viaje), que
+    // es exactamente lo que antes calculaba el doble bucle de Dijkstras, pero
+    // sin repetir trabajo por cada par (abordaje × bajada).
+    final DijkstraResult dijkstra = graph.dijkstraFrom(<(String, double)>[
+      for (final GraphNode board in boardCandidates)
+        (board.id, _walkMinutes(distanceMeters(origin, board.position))),
+    ]);
 
     double? bestCost;
     PathResult? bestPath;
@@ -108,23 +133,20 @@ class RouteEngine {
       bestCost = _walkMinutes(directWalk);
     }
 
-    for (final GraphNode board in boardCandidates) {
-      final double walkIn = _walkMinutes(distanceMeters(origin, board.position));
-      for (final GraphNode alight in alightCandidates) {
-        // Abordar y bajar en la misma estación sería "caminar a la estación y
-        // volver": no tiene sentido, el viaje a pie directo siempre es mejor.
-        if (board.id == alight.id) continue;
+    for (final GraphNode alight in alightCandidates) {
+      final double? dist = dijkstra.dist[alight.id];
+      if (dist == null) continue;
 
-        final PathResult? path = graph.shortestPath(board.id, alight.id);
-        if (path == null) continue;
+      // Abordar y bajar en la misma estación (la mejor entrada al nodo fue
+      // caminar hasta él, sin ninguna arista de por medio): ese "plan" es
+      // caminar al punto y volver, siempre ≥ caminar directo. Se descarta.
+      if (!dijkstra.prevEdge.containsKey(alight.id)) continue;
 
-        final double cost = walkIn +
-            path.totalMinutes +
-            _walkMinutes(distanceMeters(alight.position, destination));
-        if (bestCost == null || cost < bestCost) {
-          bestCost = cost;
-          bestPath = path;
-        }
+      final double cost =
+          dist + _walkMinutes(distanceMeters(alight.position, destination));
+      if (bestCost == null || cost < bestCost) {
+        bestCost = cost;
+        bestPath = graph.pathTo(dijkstra, alight.id);
       }
     }
 
@@ -137,7 +159,11 @@ class RouteEngine {
             origin: origin,
             destination: destination,
             originName: _pointLabel(origin, boardCandidates, 'Origen'),
-            destinationName: _pointLabel(destination, alightCandidates, 'Destino'),
+            destinationName: _pointLabel(
+              destination,
+              alightCandidates,
+              'Destino',
+            ),
             path: bestPath,
             graph: graph,
           )
@@ -168,8 +194,29 @@ class RouteEngine {
     int edgeIndex = 0;
     while (edgeIndex < path.edges.length) {
       final String routeId = path.edges[edgeIndex].routeId;
+
+      // Transbordo a pie entre dos estaciones de rutas distintas (ej. Metro →
+      // OMSA): el camino cruza caminando de una estación a otra cercana. La
+      // distancia es real, a diferencia del pasillo de 0 m de la estación
+      // compartida que se emite más abajo.
+      if (routeId == kTransferRouteId) {
+        final GraphNode from = graph.node(path.nodeIds[edgeIndex])!;
+        final GraphNode to = graph.node(path.nodeIds[edgeIndex + 1])!;
+        legs.add(
+          TripLeg(
+            id: 'leg-transfer-${legs.length}',
+            mode: TransportMode.walk,
+            path: <GeoPoint>[from.position, to.position],
+            lineColorHex: kWalkColor,
+          ),
+        );
+        edgeIndex++;
+        continue;
+      }
+
       int end = edgeIndex;
-      while (end + 1 < path.edges.length && path.edges[end + 1].routeId == routeId) {
+      while (end + 1 < path.edges.length &&
+          path.edges[end + 1].routeId == routeId) {
         end++;
       }
 
@@ -178,6 +225,15 @@ class RouteEngine {
         for (int i = edgeIndex; i <= end + 1; i++) graph.node(path.nodeIds[i])!,
       ];
       final TransportMode mode = transportModeForTypeId(route.transportTypeId);
+
+      // Marcar como transbordo las paradas limítrofes cuando el camino entra o
+      // sale caminando hacia otra ruta (para el badge "transbordo" en la UI).
+      final bool entersViaWalkTransfer =
+          edgeIndex > 0 &&
+          path.edges[edgeIndex - 1].routeId == kTransferRouteId;
+      final bool exitsViaWalkTransfer =
+          end + 1 < path.edges.length &&
+          path.edges[end + 1].routeId == kTransferRouteId;
 
       legs.add(
         TripLeg(
@@ -188,26 +244,32 @@ class RouteEngine {
           headsign: stations.last.name,
           path: <GeoPoint>[for (final GraphNode s in stations) s.position],
           stops: <TripStop>[
-            for (final GraphNode s in stations)
+            for (int i = 0; i < stations.length; i++)
               TripStop(
-                id: s.id,
-                name: s.name,
-                position: s.position,
-                isTransfer: s.isTransfer,
+                id: stations[i].id,
+                name: stations[i].name,
+                position: stations[i].position,
+                isTransfer:
+                    stations[i].isTransfer ||
+                    (i == 0 && entersViaWalkTransfer) ||
+                    (i == stations.length - 1 && exitsViaWalkTransfer),
               ),
           ],
-          // Tarifa de la ruta. El Metro real se paga una sola vez aunque se
-          // transborde; ese descuento queda como deuda del motor (AGENTS.md).
+          // Tarifa de la ruta. Cada tramo cobra su pasaje: un transbordo entre
+          // sistemas (Metro → OMSA) suma dos tarifas a propósito. El Metro real
+          // se paga una sola vez aunque se transborde en la misma estación; ese
+          // descuento queda como deuda del motor (AGENTS.md).
           fareDop: route.price,
           // La frecuencia no vive en Firestore todavía; sin espera estimada.
           headwayMinutes: 0,
         ),
       );
 
-      if (end + 1 < path.edges.length) {
-        // Transbordo: la estación compartida es el pasillo entre las dos
-        // líneas. El tramo es de 0 m a propósito: [TripGeometry] lo deduplica
-        // y la instrucción es un "bájate: transborda a X".
+      if (end + 1 < path.edges.length &&
+          path.edges[end + 1].routeId != kTransferRouteId) {
+        // Transbordo en estación compartida: el pasillo es la misma estación.
+        // El tramo es de 0 m a propósito: [TripGeometry] lo deduplica y la
+        // instrucción es un "bájate: transborda a X".
         final GraphNode transfer = stations.last;
         legs.add(
           TripLeg(
@@ -240,18 +302,18 @@ class RouteEngine {
   }
 
   TripPlan _walkOnlyPlan(GeoPoint origin, GeoPoint destination) => TripPlan(
-        id: _planId(origin, destination),
-        originName: 'Origen',
-        destinationName: 'Destino',
-        legs: <TripLeg>[
-          TripLeg(
-            id: 'walk-only',
-            mode: TransportMode.walk,
-            path: <GeoPoint>[origin, destination],
-            lineColorHex: kWalkColor,
-          ),
-        ],
-      );
+    id: _planId(origin, destination),
+    originName: 'Origen',
+    destinationName: 'Destino',
+    legs: <TripLeg>[
+      TripLeg(
+        id: 'walk-only',
+        mode: TransportMode.walk,
+        path: <GeoPoint>[origin, destination],
+        lineColorHex: kWalkColor,
+      ),
+    ],
+  );
 
   /// Etiqueta "Cerca de {estación}" usando la estación candidata más cercana.
   /// Sin geocodificación inversa todavía (AGENTS.md §3.2), es lo más parecido

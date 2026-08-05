@@ -11,6 +11,15 @@ import '../services/route_service.dart';
 /// defecto: [AppUser.maxWalkDistance] usa el mismo número.
 const double kDefaultMaxWalkMeters = 1500;
 
+/// Tope de caminata de la **fase 1** del cálculo con distancia superada.
+///
+/// Cuando el usuario acepta planificar pese a exceder su distancia máxima
+/// ([PlannerController.plan] con `overrideMaxWalk`), primero se busca con esta
+/// cota acotada (5 km): acota los candidatos de abordaje/bajada y mantiene el
+/// cálculo liviano. Solo si ni así hay estaciones alcanzables, la fase 2 suelta
+/// la distancia infinita.
+const double kOverrideWalkCapMeters = 5000;
+
 /// Rutas disponibles para el motor de cálculo A→B.
 final FutureProvider<List<Route>> routesProvider =
     FutureProvider<List<Route>>((ref) => RouteService().getActiveRoutes());

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import '../models/transport_mode.dart';
 import '../models/trip_instruction.dart';
 import '../models/trip_plan.dart';
+import '../routing/station_graph.dart';
 import 'route_matcher.dart';
 import 'trip_geometry.dart';
 
@@ -82,7 +83,8 @@ class InstructionEngine {
         kind: InstructionKind.offRoute,
         urgency: InstructionUrgency.critical,
         title: 'Te saliste de la ruta',
-        detail: 'Estás a ${_fmt(match.distanceFromRouteMeters)} del recorrido. '
+        detail:
+            'Estás a ${_fmt(match.distanceFromRouteMeters)} del recorrido. '
             'Vuelve o recalcula el viaje.',
         distanceMeters: match.distanceFromRouteMeters,
       );
@@ -90,9 +92,13 @@ class InstructionEngine {
 
     final int legIndex = match.legIndex.clamp(0, plan.legs.length - 1);
     final TripLeg leg = plan.legs[legIndex];
-    final double toLegEnd = math.max(0, geometry.legEndMeters[legIndex] - traveled);
-    final TripLeg? nextLeg =
-        legIndex + 1 < plan.legs.length ? plan.legs[legIndex + 1] : null;
+    final double toLegEnd = math.max(
+      0,
+      geometry.legEndMeters[legIndex] - traveled,
+    );
+    final TripLeg? nextLeg = legIndex + 1 < plan.legs.length
+        ? plan.legs[legIndex + 1]
+        : null;
 
     // 3. Todavía no se ha movido.
     if (!hasStarted) {
@@ -101,7 +107,8 @@ class InstructionEngine {
         kind: InstructionKind.start,
         urgency: InstructionUrgency.calm,
         title: _startTitle(leg),
-        detail: 'Hacia ${plan.destinationName} · '
+        detail:
+            'Hacia ${plan.destinationName} · '
             '${_fmt(geometry.totalMeters)} en total',
         legIndex: legIndex,
         lineColorHex: leg.lineColorHex,
@@ -150,7 +157,8 @@ class InstructionEngine {
         kind: InstructionKind.walkToBoarding,
         urgency: InstructionUrgency.calm,
         title: 'Camina hasta $destination',
-        detail: '${_fmt(toLegEnd)} · ${_walkMinutes(toLegEnd)} · '
+        detail:
+            '${_fmt(toLegEnd)} · ${_walkMinutes(toLegEnd)} · '
             'ahí tomas ${nextLeg.shortLabel}',
         legIndex: legIndex,
         targetStop: boarding,
@@ -167,7 +175,10 @@ class InstructionEngine {
     // paradas fijas: en un concho no existe "la próxima parada", así que aquí
     // vale `null` y las instrucciones hablan de distancia, no de paradas.
     final int? stopsToGo = leg.mode.hasFixedStops && leg.stops.isNotEmpty
-        ? math.max(0, geometry.upcomingStopsOfLeg(legIndex, traveled).length - 1)
+        ? math.max(
+            0,
+            geometry.upcomingStopsOfLeg(legIndex, traveled).length - 1,
+          )
         : null;
 
     if (toLegEnd <= thresholds.exitNowMeters) {
@@ -235,17 +246,18 @@ class InstructionEngine {
     final TripLeg next = plan.legs[nextIndex];
     if (!next.mode.isWalking) return next;
 
-    // Caminata corta = pasillo de transbordo, no un tramo del viaje.
-    if (next.distanceMeters > 250) return null;
+    // Caminata corta = pasillo de transbordo, no un tramo del viaje. La cota
+    // coincide con la distancia máxima de transbordo del motor
+    // ([kTransferWalkMeters]): un trasbordo Metro ↔ OMSA también se anuncia.
+    if (next.distanceMeters > kTransferWalkMeters) return null;
     final int afterIndex = nextIndex + 1;
     if (afterIndex >= plan.legs.length) return null;
     final TripLeg after = plan.legs[afterIndex];
     return after.mode.isWalking ? null : after;
   }
 
-  String _startTitle(TripLeg leg) => leg.mode.isWalking
-      ? 'Empieza a caminar'
-      : 'Móntate en ${leg.shortLabel}';
+  String _startTitle(TripLeg leg) =>
+      leg.mode.isWalking ? 'Empieza a caminar' : 'Móntate en ${leg.shortLabel}';
 
   String _boardDetail(TripLeg leg, String stopName) {
     final StringBuffer buffer = StringBuffer(stopName);
@@ -265,8 +277,8 @@ class InstructionEngine {
   }
 
   static String _walkMinutes(double meters) {
-    final int minutes =
-        (meters / TransportMode.walk.averageSpeedMps / 60).ceil();
+    final int minutes = (meters / TransportMode.walk.averageSpeedMps / 60)
+        .ceil();
     return minutes <= 1 ? '1 min' : '$minutes min';
   }
 }
