@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/fixtures/demo_trip_plans.dart';
 import '../domain/models/trip_plan.dart';
 import 'live_trip_controller.dart';
+import 'planner_controller.dart';
 
 /// Fuente de planes de viaje.
 ///
@@ -23,12 +24,21 @@ final Provider<List<TripPlan>> tripPlansProvider =
 
 /// Busca un plan por id. Lanza si no existe: un id inválido es un bug de
 /// navegación, no un estado que la UI deba manejar.
+///
+/// Orden de búsqueda:
+/// 1. Planes demo / favoritos ([tripPlansProvider]) — el Hito 5 llenará esta
+///    lista desde Firestore cuando exista.
+/// 2. Plan calculado por el motor A→B ([plannerControllerProvider]) — así el
+///    viaje activo puede arrancar desde un plan recién calculado en el mapa.
 final ProviderFamily<TripPlan, String> tripPlanProvider =
     Provider.family<TripPlan, String>((ref, String planId) {
-  return ref.watch(tripPlansProvider).firstWhere(
-        (TripPlan plan) => plan.id == planId,
-        orElse: () => throw StateError('No existe el plan de viaje "$planId"'),
-      );
+  final List<TripPlan> known = ref.watch(tripPlansProvider);
+  for (final TripPlan plan in known) {
+    if (plan.id == planId) return plan;
+  }
+  final TripPlan? computed = ref.watch(plannerControllerProvider).plan;
+  if (computed != null && computed.id == planId) return computed;
+  throw StateError('No existe el plan de viaje "$planId"');
 });
 
 /// Controlador del viaje activo, uno por plan.

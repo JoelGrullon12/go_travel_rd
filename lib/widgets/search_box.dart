@@ -15,12 +15,24 @@ class SearchBox extends StatelessWidget {
     required this.destinationController,
     required this.onOriginSubmitted,
     required this.onDestinationSubmitted,
+    this.onOriginTap,
+    this.onDestinationTap,
+    this.readOnly = false,
   });
 
   final TextEditingController originController;
   final TextEditingController destinationController;
   final ValueChanged<String> onOriginSubmitted;
   final ValueChanged<String> onDestinationSubmitted;
+
+  /// Al tocar el campo de origen/destino (con [readOnly], que no abre el
+  /// teclado). Se usa para entrar al flujo de "marcar punto en el mapa".
+  final VoidCallback? onOriginTap;
+  final VoidCallback? onDestinationTap;
+
+  /// Cuando `true`, los campos son de solo lectura: el punto se elige en el
+  /// mapa, no escribiendo. El teclado nunca se abre.
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +59,8 @@ class SearchBox extends StatelessWidget {
             icon: Icons.my_location,
             iconColor: AppColors.accent,
             onSubmitted: onOriginSubmitted,
+            readOnly: readOnly,
+            onTap: onOriginTap,
           ),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 8),
@@ -58,6 +72,8 @@ class SearchBox extends StatelessWidget {
             icon: Icons.location_on,
             iconColor: AppColors.textSecondary,
             onSubmitted: onDestinationSubmitted,
+            readOnly: readOnly,
+            onTap: onDestinationTap,
           ),
         ],
       ),
@@ -74,6 +90,8 @@ class _SearchField extends StatelessWidget {
     required this.icon,
     required this.iconColor,
     required this.onSubmitted,
+    this.readOnly = false,
+    this.onTap,
   });
 
   final TextEditingController controller;
@@ -81,6 +99,8 @@ class _SearchField extends StatelessWidget {
   final IconData icon;
   final Color iconColor;
   final ValueChanged<String> onSubmitted;
+  final bool readOnly;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -91,6 +111,8 @@ class _SearchField extends StatelessWidget {
         Expanded(
           child: TextField(
             controller: controller,
+            readOnly: readOnly,
+            onTap: onTap,
             textInputAction: TextInputAction.search,
             onSubmitted: onSubmitted,
             cursorColor: AppColors.accent,

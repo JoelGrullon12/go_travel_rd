@@ -6,10 +6,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_compass/flutter_compass.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+import '../application/planner_controller.dart';
 import '../domain/models/trip_plan.dart';
+import '../domain/routing/route_engine.dart';
 import '../features/live_trip/live_trip_screen.dart';
 import '../features/live_trip/widgets/map_style.dart';
 import '../features/shared/mode_visuals.dart';
@@ -25,6 +28,11 @@ import 'profile_screen.dart';
 import '../core/theme/app_colors.dart';
 import '../core/utils/formatters.dart';
 
+/// Modo en el que el mapa elige un punto con un pin fijo en el centro
+/// (estilo Uber), en vez de escribir coordenadas. [MapScreen.pickerMode]
+/// define cuál de los dos campos se está eligiendo.
+enum MapPickerMode { origin, destination }
+
 /// Pantalla principal: mapa a pantalla completa + buscador flotante
 /// estilo Uber + estaciones de Firestore + acceso al perfil.
 ///
@@ -36,12 +44,13 @@ import '../core/utils/formatters.dart';
 /// (stream continuo). Si el GPS está apagado o el permiso es
 /// denegado, se usa [_defaultLocation] (Santo Domingo) como fallback
 /// para que la app siga funcionando.
-class MapScreen extends StatefulWidget {
+class MapScreen extends ConsumerStatefulWidget {
   const MapScreen({
     super.key,
     this.plan,
     this.initialOrigin = '',
     this.initialDestination = '',
+    this.pickerMode,
   });
 
   /// Plan de viaje ya resuelto (viene del Hito 4 / demo del Hito 2).
@@ -55,11 +64,17 @@ class MapScreen extends StatefulWidget {
   final String initialOrigin;
   final String initialDestination;
 
+  /// Cuando no es `null`, el mapa entra en modo "elegir punto con el pin":
+  /// se muestra un pin fijo en el centro y una barra inferior para confirmar
+  /// el punto ([MapPickerMode.origin]) o calcular la ruta
+  /// ([MapPickerMode.destination]).
+  final MapPickerMode? pickerMode;
+
   @override
-  State<MapScreen> createState() => _MapScreenState();
+  ConsumerState<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends ConsumerState<MapScreen> {
   final _authService = AuthService();
   final _locationService = LocationService();
   final _stationService = StationService();
@@ -148,6 +163,22 @@ class _MapScreenState extends State<MapScreen> {
   /// Su presencia activa la barra inferior con el botón "Iniciar Viaje".
   TripPlan? _activePlan;
 
+  // ---------------------------------------------------------------------
+  // Selección de punto con pin (Hito 2)
+  // ---------------------------------------------------------------------
+
+  /// Cuál de los dos puntos se está eligiendo ahora (`null` = no seleccionando).
+  MapPickerMode? _pickerMode;
+
+  /// Centro de la cámara en vivo. En modo pin es el punto que se confirma.
+  /// `ValueNotifier` para actualizar las coordenadas de la barra sin
+  /// reconstruir todo el mapa en cada frame del gesto de cámara.
+  final ValueNotifier<LatLng?> _cameraTarget = ValueNotifier<LatLng?>(null);
+
+  /// Puntos ya confirmados (se pasan al motor en [MapPickerMode.destination]).
+  LatLng? _pickerOriginPoint;
+  LatLng? _pickerDestinationPoint;
+
   @override
   void initState() {
     super.initState();
@@ -158,6 +189,7 @@ class _MapScreenState extends State<MapScreen> {
     _markers.add(_buildOriginMarker(_defaultLocation));
     origin = 'Mi ubicación actual';
     _originController.text = origin;
+    _cameraTarget.value = _initialCameraPosition.target;
     _startLocationTracking();
     _initLocationIndicator();
     _startCompassTracking();
@@ -173,6 +205,24 @@ class _MapScreenState extends State<MapScreen> {
       _destinationController.text = widget.initialDestination;
     }
     if (widget.plan != null) _activatePlan(widget.plan!);
+
+    // Modo "elegir punto": entra directamente a la selección del campo pedido.
+    if (widget.pickerMode != null) {
+      _pickerMode = widget.pickerMode;
+      if (_pickerMode == MapPickerMode.origin) _originController.clear();
+      if (_pickerMode == MapPickerMode.destination) _destinationController.clear();
+    }
+
+    // Resultado del motor A→B: dibuja el plan calculado o muestra el fallo.
+    ref.listen(plannerControllerProvider, (PlannerState? prev, PlannerState next) {
+      if (!mounted) return;
+      final TripPlan? plan = next.plan;
+      if (plan != null && _activePlan?.id != plan.id) {
+        _activatePlan(plan);
+      } else if (next.failure != null && prev?.failure != next.failure) {
+        _showFailure(next.failure!);
+      }
+    });
   }
 
   @override
@@ -181,6 +231,7 @@ class _MapScreenState extends State<MapScreen> {
     _compassSubscription?.cancel();
     _originController.dispose();
     _destinationController.dispose();
+    _cameraTarget.dispose();
     _mapController?.dispose();
     super.dispose();
   }
@@ -342,6 +393,12 @@ class _MapScreenState extends State<MapScreen> {
     final GoogleMapController? controller = _mapController;
     if (controller == null) return;
 
+    // Con un plan activo el mapa muestra la ruta, no el catálogo de estaciones.
+    if (_activePlan != null) {
+      _removeStationMarkers();
+      return;
+    }
+
     final int bucket = _stationZoomBucket(_lastZoom);
     if (bucket == 0) {
       _removeStationMarkers();
@@ -476,9 +533,9 @@ class _MapScreenState extends State<MapScreen> {
   /// Activa un plan: dibuja su ruta y sus extremos sobre el mapa y guarda
   /// el plan para habilitar el botón "Iniciar Viaje".
   ///
-  /// Mientras no exista el motor del Hito 2, el plan llega de la pantalla
-  /// de inicio (rutas demo). Cuando el motor exista, este mismo código
-  /// dibuja lo que devuelva el cálculo — solo cambia el origen del plan.
+  /// El plan llega de dos sitios: de la pantalla de inicio (rutas demo) o del
+  /// motor del Hito 2 ([plannerControllerProvider]). Para la UI es lo mismo:
+  /// solo cambia el origen del plan.
   void _activatePlan(TripPlan plan) {
     setState(() {
       _activePlan = plan;
@@ -503,6 +560,10 @@ class _MapScreenState extends State<MapScreen> {
         );
       }
 
+      // El plan reemplaza el catálogo de estaciones del viewport.
+      _markers.removeWhere(
+        (Marker m) => m.markerId.value.startsWith('station-'),
+      );
       _markers.removeWhere(
         (m) =>
             m.markerId == const MarkerId('plan-origin') ||
@@ -531,8 +592,40 @@ class _MapScreenState extends State<MapScreen> {
       );
     });
 
+    _fitToPlan(plan);
+  }
+
+  /// Encuadra la cámara para que toda la ruta del plan quede visible.
+  void _fitToPlan(TripPlan plan) {
+    final List<LatLng> all = <LatLng>[
+      for (final leg in plan.legs) ...leg.path.map((p) => p.toLatLng),
+    ];
+    if (all.isEmpty) return;
+
+    double minLat = all.first.latitude, maxLat = all.first.latitude;
+    double minLng = all.first.longitude, maxLng = all.first.longitude;
+    for (final LatLng p in all) {
+      minLat = min(minLat, p.latitude);
+      maxLat = max(maxLat, p.latitude);
+      minLng = min(minLng, p.longitude);
+      maxLng = max(maxLng, p.longitude);
+    }
+
+    // Puntos degenerados (ej. solo-a-pie con extremos casi iguales): la vista
+    // aérea de un cuadro de 0 m lanza excepción en el plugin.
+    if (maxLat - minLat < 1e-6 && maxLng - minLng < 1e-6) {
+      _mapController?.animateCamera(CameraUpdate.newLatLng(plan.origin.toLatLng));
+      return;
+    }
+
     _mapController?.animateCamera(
-      CameraUpdate.newLatLngZoom(plan.origin.toLatLng, 14),
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(
+          southwest: LatLng(minLat, minLng),
+          northeast: LatLng(maxLat, maxLng),
+        ),
+        80,
+      ),
     );
   }
 
@@ -635,6 +728,96 @@ class _MapScreenState extends State<MapScreen> {
     FocusScope.of(context).unfocus();
   }
 
+  // ---------------------------------------------------------------------
+  // Selección de punto con pin (Hito 2)
+  // ---------------------------------------------------------------------
+
+  /// Confirma el punto del centro de la cámara como origen o destino.
+  /// Origen → avanza a elegir destino (auto-avance). Destino → calcula la ruta.
+  void _confirmPick() {
+    final LatLng? target = _cameraTarget.value;
+    if (target == null) return;
+
+    if (_pickerMode == MapPickerMode.origin) {
+      setState(() {
+        _pickerOriginPoint = target;
+        _originController.text = _coordinateLabel(target);
+        _pickerMode = MapPickerMode.destination;
+        _destinationController.clear();
+      });
+      return;
+    }
+
+    setState(() {
+      _pickerDestinationPoint = target;
+      _destinationController.text = _coordinateLabel(target);
+    });
+    _computeRoute();
+  }
+
+  /// Usa la posición real del GPS como origen y avanza a elegir destino.
+  Future<void> _useMyLocationForOrigin() async {
+    LatLng? current = _currentLocation;
+    if (current == null) {
+      final position = await _locationService.getCurrentPosition();
+      if (position == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No se pudo obtener tu ubicación. Activa el GPS o concede el permiso de ubicación.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      current = LatLng(position.latitude, position.longitude);
+    }
+
+    _cameraTarget.value = current;
+    setState(() {
+      _pickerOriginPoint = current;
+      _originController.text = 'Mi ubicación actual';
+      _pickerMode = MapPickerMode.destination;
+      _destinationController.clear();
+    });
+    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(current, 16));
+  }
+
+  /// Lanza el motor A→B con los dos puntos confirmados. El resultado llega por
+  /// el listener de [plannerControllerProvider] en `initState`.
+  void _computeRoute() {
+    final LatLng? originLatLng = _pickerOriginPoint;
+    final LatLng? destinationLatLng = _pickerDestinationPoint;
+    if (originLatLng == null || destinationLatLng == null) return;
+
+    setState(() => _pickerMode = null);
+    ref.read(plannerControllerProvider.notifier).plan(
+          origin: originLatLng.toGeoPoint,
+          destination: destinationLatLng.toGeoPoint,
+        );
+  }
+
+  void _showFailure(RoutePlanFailure failure) {
+    final String message = switch (failure) {
+      RoutePlanFailure.noStationsNearOrigin =>
+        'No hay estaciones a menos de tu distancia a pie del origen. '
+            'Acércate a una estación del Metro o a una parada de OMSA.',
+      RoutePlanFailure.noStationsNearDestination =>
+        'No hay estaciones a menos de tu distancia a pie del destino. '
+            'Acércate a una estación del Metro o a una parada de OMSA.',
+      RoutePlanFailure.noRoute =>
+        'No se encontró una ruta entre esos puntos. Prueba con otro origen o destino.',
+    };
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// "18.48612, -69.93123" — sin geocodificación inversa, es la descripción
+  /// más exacta que se le puede dar al punto confirmado.
+  String _coordinateLabel(LatLng point) =>
+      '${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}';
+
   Future<void> _onLocationButtonPressed() async {
     final current = _currentLocation;
     if (current != null) {
@@ -691,6 +874,8 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final PlannerState plannerState = ref.watch(plannerControllerProvider);
+
     return Scaffold(
       // El mapa ocupa toda la pantalla; el buscador y el avatar se
       // superponen encima con un Stack.
@@ -725,9 +910,34 @@ class _MapScreenState extends State<MapScreen> {
             },
             onCameraMove: (CameraPosition position) {
               _lastZoom = position.zoom;
+              // En modo pin, el centro de la cámara es el punto que se elige.
+              // Se actualiza sin setState: la barra lo escucha con un
+              // ValueListenableBuilder (no reconstruir el mapa por frame).
+              _cameraTarget.value = position.target;
             },
             onCameraIdle: _onCameraIdle,
           ),
+
+          // Pin fijo en el centro mientras se elige un punto (estilo Uber).
+          if (_pickerMode != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Center(
+                  child: Transform.translate(
+                    offset: const Offset(0, -16),
+                    child: const Icon(
+                      Icons.location_on,
+                      size: 44,
+                      color: AppColors.critical,
+                      shadows: <Shadow>[
+                        Shadow(color: Colors.black, blurRadius: 6),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -738,8 +948,11 @@ class _MapScreenState extends State<MapScreen> {
                     child: SearchBox(
                       originController: _originController,
                       destinationController: _destinationController,
+                      readOnly: true,
                       onOriginSubmitted: _onOriginSubmitted,
                       onDestinationSubmitted: _onDestinationSubmitted,
+                      onOriginTap: _startOriginPick,
+                      onDestinationTap: _startDestinationPick,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -748,6 +961,23 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
           ),
+
+          if (_pickerMode != null)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16 + MediaQuery.paddingOf(context).bottom,
+              child: _PickPointBar(
+                mode: _pickerMode!,
+                coordinates: _cameraTarget,
+                isComputing: plannerState.isComputing,
+                onConfirm: _confirmPick,
+                onUseMyLocation: _pickerMode == MapPickerMode.origin
+                    ? _useMyLocationForOrigin
+                    : null,
+              ),
+            ),
+
           if (_activePlan != null)
             Positioned(
               left: 16,
@@ -772,10 +1002,28 @@ class _MapScreenState extends State<MapScreen> {
             ),
         ],
       ),
-      floatingActionButton: _activePlan == null
+      floatingActionButton: _activePlan == null && _pickerMode == null
           ? _MyLocationFab(onPressed: _onLocationButtonPressed)
           : null,
     );
+  }
+
+  /// Re-entra al modo de elegir el punto de origen con el pin.
+  void _startOriginPick() {
+    if (_activePlan != null || _pickerMode != null) return;
+    setState(() {
+      _pickerMode = MapPickerMode.origin;
+      _originController.clear();
+    });
+  }
+
+  /// Re-entra al modo de elegir el punto de destino con el pin.
+  void _startDestinationPick() {
+    if (_activePlan != null || _pickerMode != null) return;
+    setState(() {
+      _pickerMode = MapPickerMode.destination;
+      _destinationController.clear();
+    });
   }
 
   Widget _buildProfileAvatar() {
@@ -810,8 +1058,123 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
-/// Botón flotante "mi ubicación", en tema oscuro.
+/// Barra inferior del modo "elegir punto con el pin" (Hito 2).
 ///
+/// Muestra el centro de la cámara en vivo (coordenadas), un atajo "mi
+/// ubicación" solo para el origen, y el botón que confirma el punto o —si ya
+/// es el destino— lanza el cálculo de la ruta.
+class _PickPointBar extends StatelessWidget {
+  const _PickPointBar({
+    required this.mode,
+    required this.coordinates,
+    required this.isComputing,
+    required this.onConfirm,
+    this.onUseMyLocation,
+  });
+
+  final MapPickerMode mode;
+  final ValueNotifier<LatLng?> coordinates;
+  final bool isComputing;
+  final VoidCallback onConfirm;
+  final VoidCallback? onUseMyLocation;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextTheme text = Theme.of(context).textTheme;
+    final bool isOrigin = mode == MapPickerMode.origin;
+
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(18),
+      elevation: 8,
+      shadowColor: Colors.black,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(
+                  isOrigin ? Icons.my_location : Icons.flag_rounded,
+                  size: 20,
+                  color: AppColors.accent,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    isOrigin
+                        ? 'Elige tu ubicación de partida'
+                        : 'Elige tu destino',
+                    style: text.titleMedium,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            ValueListenableBuilder<LatLng?>(
+              valueListenable: coordinates,
+              builder: (BuildContext context, LatLng? target, Widget? _) {
+                if (target == null) return const SizedBox.shrink();
+                return Text(
+                  '${target.latitude.toStringAsFixed(5)}, '
+                  '${target.longitude.toStringAsFixed(5)}',
+                  style: text.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                    fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            if (isComputing)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const <Widget>[
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 12),
+                  Text('Calculando ruta…'),
+                ],
+              )
+            else
+              Row(
+                children: <Widget>[
+                  if (onUseMyLocation != null) ...<Widget>[
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: onUseMyLocation,
+                        icon: const Icon(Icons.gps_fixed, size: 18),
+                        label: const Text('Mi ubicación'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(
+                    flex: onUseMyLocation != null ? 1 : 3,
+                    child: FilledButton.icon(
+                      onPressed: onConfirm,
+                      icon: Icon(
+                        isOrigin ? Icons.arrow_forward_rounded : Icons.search,
+                        size: 18,
+                      ),
+                      label: Text(isOrigin ? 'Continuar' : 'Calcular ruta'),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Botón flotante "mi ubicación", en tema oscuro.///
 /// Vive en dos sitios según el contexto:
 /// · sin plan activo, como `floatingActionButton` del `Scaffold` (posicionado
 ///   automáticamente sobre la barra de navegación);

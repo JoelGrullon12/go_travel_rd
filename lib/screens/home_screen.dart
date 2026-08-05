@@ -67,6 +67,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  /// Abre el mapa en modo "elegir punto con el pin" (Hito 2).
+  void _openPicker(MapPickerMode mode) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MapScreen(
+          pickerMode: mode,
+          initialOrigin: _originController.text,
+          initialDestination: _destinationController.text,
+        ),
+      ),
+    );
+  }
+
   void _openProfile() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -117,11 +130,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             const SizedBox(height: Spacing.xxl),
 
             // ── Buscador de origen / destino ──────────────────────────────
+            // Los campos abren el mapa para marcar el punto con el pin; el
+            // teclado no interviene en la elección.
             SearchBox(
               originController: _originController,
               destinationController: _destinationController,
+              readOnly: true,
               onOriginSubmitted: (_) => _openMap(),
               onDestinationSubmitted: (_) => _openMap(),
+              onOriginTap: () => _openPicker(MapPickerMode.origin),
+              onDestinationTap: () => _openPicker(MapPickerMode.destination),
             ),
             const SizedBox(height: Spacing.md),
 

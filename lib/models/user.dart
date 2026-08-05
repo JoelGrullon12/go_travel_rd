@@ -12,7 +12,7 @@ class AppUser {
     required this.email,
     required this.name,
     this.favoriteTransportTypeIds = const [],
-    this.maxWalkDistance = 500.0,
+    this.maxWalkDistance = 1500.0,
     this.routePreference = 'speed',
     this.photoUrl,
   });
@@ -33,7 +33,7 @@ class AppUser {
         name: map['name'] as String? ?? '',
         favoriteTransportTypeIds:
             List<String>.from(map['favoriteTransportTypeIds'] as List? ?? []),
-        maxWalkDistance: (map['maxWalkDistance'] as num?)?.toDouble() ?? 500.0,
+        maxWalkDistance: (map['maxWalkDistance'] as num?)?.toDouble() ?? 1500.0,
         routePreference: map['routePreference'] as String? ?? 'speed',
         photoUrl: map['photoUrl'] as String?,
       );
