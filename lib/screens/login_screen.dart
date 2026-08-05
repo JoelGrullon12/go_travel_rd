@@ -6,7 +6,13 @@ import 'register_screen.dart';
 import 'map_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.popAfterSignIn = false});
+
+  /// Cuando es `true`, al iniciar sesión se vuelve a la pantalla anterior
+  /// (`Navigator.pop`) en vez de reemplazar por [MapScreen]. Se usa desde
+  /// [MapScreen] para el flujo "guardar ruta sin sesión": el usuario se
+  /// identifica y vuelve al mapa con la ruta aún cargada.
+  final bool popAfterSignIn;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -17,6 +23,16 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   final _authService = AuthService();
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.popAfterSignIn) {
+      _authService.authStateChanges.listen((user) {
+        if (user != null && mounted) Navigator.of(context).pop();
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -32,7 +48,10 @@ class _LoginScreenState extends State<LoginScreen> {
         _emailController.text.trim(),
         _passwordController.text,
       );
-      if (mounted) {
+      if (!mounted) return;
+      // Con `popAfterSignIn` el cierre lo hace el listener de authStateChanges
+      // (cubre también el flujo de registro): el mapa espera este `pop`.
+      if (!widget.popAfterSignIn) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const MapScreen()),
@@ -53,7 +72,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _loading = true);
     try {
       final user = await _authService.signInWithGoogle();
-      if (user != null && mounted) {
+      if (user != null && mounted && !widget.popAfterSignIn) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const MapScreen()),
@@ -150,7 +169,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                                builder: (_) => const RegisterScreen()),
+                                builder: (_) => RegisterScreen(
+                                    popAfterSignIn: widget.popAfterSignIn)),
                           );
                         },
                   icon: const Icon(Icons.person_add),

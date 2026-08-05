@@ -1,11 +1,9 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -19,9 +17,11 @@ import '../features/live_trip/widgets/map_style.dart';
 import '../features/shared/mode_visuals.dart';
 import '../features/shared/station_visuals.dart';
 import '../models/station.dart';
+import '../models/user_route.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/station_service.dart';
+import '../services/user_route_service.dart';
 import '../widgets/search_box.dart';
 import 'login_screen.dart';
 import 'profile_screen.dart';
@@ -49,17 +49,23 @@ class MapScreen extends ConsumerStatefulWidget {
   const MapScreen({
     super.key,
     this.plan,
+    this.savedRoute,
     this.initialOrigin = '',
     this.initialDestination = '',
     this.pickerMode,
   });
 
-  /// Plan de viaje ya resuelto (viene del Hito 4 / demo del Hito 2).
+  /// Plan de viaje ya resuelto (viene del Hito 4 / motor del Hito 2).
   ///
   /// Cuando se pasa, el mapa dibuja la ruta del plan y muestra la barra
   /// inferior con el botón "Iniciar Viaje". Sin plan, el mapa conserva el
   /// comportamiento de exploración (búsqueda libre + marcadores).
   final TripPlan? plan;
+
+  /// Ruta personalizada guardada (Hito 5). Al abrirse, el mapa lanza el motor
+  /// A→B con su origen/destino para recalcular el plan actual (los datos
+  /// guardados son solo puntos, no geometría).
+  final UserRoute? savedRoute;
 
   /// Textos con los que se pre-llenan los campos de origen y destino.
   final String initialOrigin;
@@ -102,19 +108,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   /// Última posición real del usuario (desde el stream de GPS).
   LatLng? _currentLocation;
 
-  /// Icono personalizado de ubicación actual (círculo azul con borde
-  /// blanco + indicador de rumbo), generado al iniciar la pantalla.
-  BitmapDescriptor? _locationIndicatorIcon;
-
-  /// Rumbo actual del usuario en grados (0 = norte). Rota el icono de
-  /// ubicación actual cuando el dispositivo gira.
-  double _heading = 0.0;
-
   StreamSubscription<Position>? _positionSubscription;
-
-  /// Suscripción a la brújula del dispositivo (rota el icono de
-  /// ubicación actual según la orientación del teléfono).
-  StreamSubscription<CompassEvent>? _compassSubscription;
 
   /// Evita animar la cámara hacia la ubicación más de una vez al inicio.
   bool _cameraCenteredOnStart = false;
@@ -192,13 +186,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _authService.authStateChanges.listen((user) {
       if (mounted) setState(() => _user = user);
     });
-    _markers.add(_buildOriginMarker(_defaultLocation));
     origin = 'Mi ubicación actual';
     _originController.text = origin;
     _cameraTarget.value = _initialCameraPosition.target;
     _startLocationTracking();
-    _initLocationIndicator();
-    _startCompassTracking();
 
     // Plan recibido desde la pantalla de inicio: se pre-llenan los campos,
     // se dibuja la ruta y se habilita "Iniciar Viaje".
@@ -211,6 +202,24 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       _destinationController.text = widget.initialDestination;
     }
     if (widget.plan != null) _activatePlan(widget.plan!);
+
+    // Ruta personalizada guardada: se preparan los puntos de origen/destino y
+    // se recalcula con el motor tras el primer frame. El plan resultante vive
+    // en `plannerControllerProvider`, así "Iniciar Viaje" lo resuelve.
+    final UserRoute? saved = widget.savedRoute;
+    if (saved != null) {
+      _pickerOriginPoint =
+          LatLng(saved.startLocation.latitude, saved.startLocation.longitude);
+      _pickerDestinationPoint =
+          LatLng(saved.finishLocation.latitude, saved.finishLocation.longitude);
+      origin = _coordinateLabel(_pickerOriginPoint!);
+      _originController.text = origin;
+      destination = _coordinateLabel(_pickerDestinationPoint!);
+      _destinationController.text = destination;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _computeRoute();
+      });
+    }
 
     // Modo "elegir punto": entra directamente a la selección del campo pedido.
     if (widget.pickerMode != null) {
@@ -225,7 +234,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   @override
   void dispose() {
     _positionSubscription?.cancel();
-    _compassSubscription?.cancel();
     _originController.dispose();
     _destinationController.dispose();
     _cameraTarget.dispose();
@@ -250,103 +258,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
-  /// Escucha la brújula del dispositivo para rotar el icono de
-  /// ubicación actual cuando se gira el teléfono.
-  ///
-  /// El rumbo de `geolocator` solo refleja la dirección de movimiento
-  /// (curso GPS), no la orientación del teléfono, por eso se usa el
-  /// magnetómetro del dispositivo como fuente de rotación.
-  void _startCompassTracking() {
-    final stream = FlutterCompass.events;
-    if (stream == null) return;
-    _compassSubscription = stream.listen(_onCompassHeading);
-  }
-
-  void _onCompassHeading(CompassEvent event) {
-    final heading = event.heading;
-    if (heading == null) return;
-    setState(() {
-      _heading = heading;
-      _markers.removeWhere((m) => m.markerId == const MarkerId('origin'));
-      _markers.add(_buildOriginMarker(_currentLocation ?? _defaultLocation));
-    });
-  }
-
   void _onPositionUpdate(Position position) {
     final latLng = LatLng(position.latitude, position.longitude);
-    final heading = position.heading < 0 ? _heading : position.heading;
-    setState(() {
-      _currentLocation = latLng;
-      _heading = heading;
-      _markers.removeWhere((m) => m.markerId == const MarkerId('origin'));
-      _markers.add(_buildOriginMarker(latLng));
-    });
+    setState(() => _currentLocation = latLng);
 
     if (!_cameraCenteredOnStart) {
       _cameraCenteredOnStart = true;
       _mapController?.animateCamera(CameraUpdate.newLatLngZoom(latLng, 16));
     }
-  }
-
-  Future<void> _initLocationIndicator() async {
-    final icon = await _buildLocationIndicatorIcon();
-    if (!mounted) return;
-    setState(() {
-      _locationIndicatorIcon = icon;
-      _markers.removeWhere((m) => m.markerId == const MarkerId('origin'));
-      _markers.add(_buildOriginMarker(_currentLocation ?? _defaultLocation));
-    });
-  }
-
-  /// Genera el icono de ubicación actual estilo Google Maps/Uber:
-  /// círculo azul con borde blanco y un indicador de rumbo que apunta
-  /// al norte por defecto. [Marker.rotation] lo rota con el rumbo del
-  /// dispositivo.
-  Future<BitmapDescriptor> _buildLocationIndicatorIcon() async {
-    const size = 128.0;
-    final center = Offset(size / 2, size / 2);
-    const blue = Color(0xFF1A73E8);
-
-    final recorder = ui.PictureRecorder();
-    final canvas = ui.Canvas(recorder);
-
-    // Sombra sutil
-    final shadow = ui.Paint()..isAntiAlias = true;
-    shadow.color = const Color(0x40000000);
-    canvas.drawCircle(center + const Offset(0, 3), 30, shadow);
-
-    // Indicador de rumbo (triángulo apuntando al norte por defecto)
-    final arrow = ui.Paint()..isAntiAlias = true;
-    arrow.color = blue;
-    final arrowPath = ui.Path()
-      ..moveTo(size / 2, size / 2 - 52)
-      ..lineTo(size / 2 - 15, size / 2 - 20)
-      ..lineTo(size / 2 + 15, size / 2 - 20)
-      ..close();
-    canvas.drawPath(arrowPath, arrow);
-
-    // Borde blanco
-    final border = ui.Paint()..isAntiAlias = true;
-    border.color = Colors.white;
-    canvas.drawCircle(center, 30, border);
-
-    // Círculo azul
-    final fill = ui.Paint()..isAntiAlias = true;
-    fill.color = blue;
-    canvas.drawCircle(center, 24, fill);
-
-    // Punto interior blanco
-    final dot = ui.Paint()..isAntiAlias = true;
-    dot.color = Colors.white;
-    canvas.drawCircle(center, 8, dot);
-
-    final picture = recorder.endRecording();
-    final image = await picture.toImage(size.toInt(), size.toInt());
-    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.bytes(
-      bytes!.buffer.asUint8List(),
-      imagePixelRatio: 2,
-    );
   }
 
   // ---------------------------------------------------------------------
@@ -731,6 +650,119 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   // ---------------------------------------------------------------------
+  // Ruta personalizada: guardar e invertir (Hito 5)
+  // ---------------------------------------------------------------------
+
+  /// Guarda la ruta activa en `users/{uid}.userRoutes`. Sin sesión, primero
+  /// envía al login (que vuelve al mapa con la ruta intacta) y solo sigue si
+  /// el usuario terminó identificándose.
+  Future<void> _onSaveRoute() async {
+    final TripPlan? plan = _activePlan;
+    if (plan == null) return;
+
+    if (_user == null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => const LoginScreen(popAfterSignIn: true),
+        ),
+      );
+      if (!mounted || _user == null) return;
+    }
+
+    final String? name = await _promptRouteName();
+    if (name == null || name.isEmpty) return;
+
+    final UserRoute route = UserRoute(
+      id: 'route-${DateTime.now().millisecondsSinceEpoch}',
+      name: name,
+      startLocation: GeoPoint(plan.origin.lat, plan.origin.lng),
+      finishLocation: GeoPoint(plan.destination.lat, plan.destination.lng),
+      preferredTransportTypeId: _preferredTransportTypeId(plan),
+    );
+
+    try {
+      await UserRouteService().saveRoute(route);
+      ref.invalidate(userRoutesProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ruta guardada')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo guardar la ruta')),
+      );
+    }
+  }
+
+  /// Invierte la ruta activa: el origen pasa a ser el destino y viceversa.
+  /// Se intercambian los puntos confirmados y se vuelve a llamar al motor, que
+  /// recalcula el plan en la dirección opuesta (todas las aristas del grafo
+  /// son bidireccionales, así que el resultado es equivalente a darle la vuelta
+  /// al plan dibujado).
+  void _onInvertRoute() {
+    final TripPlan? plan = _activePlan;
+    if (plan == null) return;
+
+    _pickerOriginPoint ??= LatLng(plan.origin.lat, plan.origin.lng);
+    _pickerDestinationPoint ??=
+        LatLng(plan.destination.lat, plan.destination.lng);
+
+    final LatLng tmp = _pickerOriginPoint!;
+    _pickerOriginPoint = _pickerDestinationPoint;
+    _pickerDestinationPoint = tmp;
+
+    final String tmpText = origin;
+    origin = destination;
+    destination = tmpText;
+    _originController.text = origin;
+    _destinationController.text = destination;
+
+    _computeRoute();
+  }
+
+  /// Diálogo para nombrar la ruta personalizada antes de guardarla.
+  Future<String?> _promptRouteName() {
+    final TextEditingController controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Guardar ruta personalizada'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            labelText: 'Nombre de la ruta',
+            hintText: 'Ej. Casa → Trabajo',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Primer tipo de transporte con vehículo del plan (para la ruta guardada).
+  String _preferredTransportTypeId(TripPlan plan) {
+    for (final TripLeg leg in plan.legs) {
+      if (!leg.mode.isWalking) return leg.mode.code;
+    }
+    return '';
+  }
+
+  // ---------------------------------------------------------------------
   // Helpers de marcadores
   // ---------------------------------------------------------------------
 
@@ -744,19 +776,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ? _stationTypeIcons[key]!
           : BitmapDescriptor.defaultMarker,
       infoWindow: InfoWindow(title: station.name),
-    );
-  }
-
-  Marker _buildOriginMarker(LatLng position) {
-    return Marker(
-      markerId: const MarkerId('origin'),
-      position: position,
-      rotation: _heading,
-      anchor: const Offset(0.5, 0.5),
-      icon:
-          _locationIndicatorIcon ??
-          BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-      infoWindow: const InfoWindow(title: 'Origen'),
     );
   }
 
@@ -991,13 +1010,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     if (position != null) {
       final latLng = LatLng(position.latitude, position.longitude);
-      final heading = position.heading < 0 ? _heading : position.heading;
-      setState(() {
-        _currentLocation = latLng;
-        _heading = heading;
-        _markers.removeWhere((m) => m.markerId == const MarkerId('origin'));
-        _markers.add(_buildOriginMarker(latLng));
-      });
+      setState(() => _currentLocation = latLng);
       _mapController?.animateCamera(CameraUpdate.newLatLngZoom(latLng, 16));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1049,9 +1062,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     });
 
     return PopScope(
-      // Atrás con un plan calculado (o con origen confirmado) vuelve a la
-      // planificación conservando el origen (cambio 6); los planes demo abiertos
-      // desde Home siguen saliendo con atrás.
+      // Atrás con un plan calculado vuelve a la planificación conservando el
+      // origen (cambio 6); sin plan el atrás sale de la pantalla normalmente
+      // (durante la elección de puntos ya no queda atrapado).
       canPop: !_canInterceptBack(),
       onPopInvokedWithResult: (bool didPop, Object? result) {
         if (didPop || !_canInterceptBack()) return;
@@ -1184,7 +1197,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         onPressed: _onLocationButtonPressed,
                       ),
                     ),
-                    _StartTripBar(plan: _activePlan!, onStart: _startTrip),
+                    _StartTripBar(
+                      plan: _activePlan!,
+                      onStart: _startTrip,
+                      onSaveRoute: _onSaveRoute,
+                      onInvertRoute: _onInvertRoute,
+                    ),
                   ],
                 ),
               ),
@@ -1251,10 +1269,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   /// `true` si el atrás debe volver al flujo de planificación en vez de salir
-  /// de la pantalla: hay un origen confirmado o un plan calculado por el motor
-  /// (los planes demo abiertos desde Home siguen saliendo con atrás).
+  /// de la pantalla: solo cuando hay un plan calculado por el motor (los planes
+  /// demo abiertos desde Home siguen saliendo con atrás).
   bool _canInterceptBack() {
-    if (_pickerOriginPoint != null) return true;
     return _activePlan != null && _didComputeRoute;
   }
 
@@ -1480,13 +1497,24 @@ class _MyLocationFab extends StatelessWidget {
   );
 }
 
+/// Acciones del menú de tres puntos de la barra del plan.
+enum _PlanMenuAction { saveRoute, invertRoute }
+
 /// Barra inferior estilo Google Maps: resumen de la ruta + botón
-/// "Iniciar Viaje". Solo aparece cuando hay un plan activo en el mapa.
+/// "Iniciar Viaje" + menú de opciones (guardar ruta personalizada, invertir).
+/// Solo aparece cuando hay un plan activo en el mapa.
 class _StartTripBar extends StatelessWidget {
-  const _StartTripBar({required this.plan, required this.onStart});
+  const _StartTripBar({
+    required this.plan,
+    required this.onStart,
+    required this.onSaveRoute,
+    required this.onInvertRoute,
+  });
 
   final TripPlan plan;
   final VoidCallback onStart;
+  final VoidCallback onSaveRoute;
+  final VoidCallback onInvertRoute;
 
   @override
   Widget build(BuildContext context) {
@@ -1545,10 +1573,53 @@ class _StartTripBar extends StatelessWidget {
               style: text.bodySmall?.copyWith(color: AppColors.textTertiary),
             ),
             const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: onStart,
-              icon: const Icon(Icons.play_arrow_rounded, size: 18),
-              label: const Text('Iniciar Viaje'),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: onStart,
+                    icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                    label: const Text('Iniciar Viaje'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                PopupMenuButton<_PlanMenuAction>(
+                  onSelected: (action) => switch (action) {
+                    _PlanMenuAction.saveRoute => onSaveRoute(),
+                    _PlanMenuAction.invertRoute => onInvertRoute(),
+                  },
+                  icon: const Icon(Icons.more_vert),
+                  tooltip: 'Opciones de la ruta',
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  itemBuilder: (BuildContext context) =>
+                      const <PopupMenuEntry<_PlanMenuAction>>[
+                    PopupMenuItem<_PlanMenuAction>(
+                      value: _PlanMenuAction.saveRoute,
+                      child: Row(
+                        children: <Widget>[
+                          Icon(Icons.bookmark_add_outlined,
+                              size: 18, color: AppColors.textPrimary),
+                          SizedBox(width: 10),
+                          Text('Guardar ruta personalizada'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem<_PlanMenuAction>(
+                      value: _PlanMenuAction.invertRoute,
+                      child: Row(
+                        children: <Widget>[
+                          Icon(Icons.swap_vert,
+                              size: 18, color: AppColors.textPrimary),
+                          SizedBox(width: 10),
+                          Text('Invertir ruta'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ],
         ),

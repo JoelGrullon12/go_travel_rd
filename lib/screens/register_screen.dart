@@ -5,7 +5,12 @@ import '../services/auth_service.dart';
 import 'map_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
-  const RegisterScreen({super.key});
+  const RegisterScreen({super.key, this.popAfterSignIn = false});
+
+  /// Cuando es `true`, tras registrarse se vuelve a la pantalla anterior en vez
+  /// de reemplazar por [MapScreen]. El [LoginScreen] que lo abre detecta la
+  /// sesión y hace su propio `pop`, devolviendo al mapa con la ruta intacta.
+  final bool popAfterSignIn;
 
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
@@ -50,13 +55,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _loading = true);
     try {
       await _authService.registerWithEmail(name, email, password);
-      if (mounted) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => const MapScreen()),
-          (_) => false,
-        );
+      if (!mounted) return;
+      if (widget.popAfterSignIn) {
+        // Vuelve al LoginScreen; su listener de authStateChanges cierra el login.
+        Navigator.pop(context);
+        return;
       }
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MapScreen()),
+        (_) => false,
+      );
     } on FirebaseAuthException catch (e) {
       _showError(_errorMessage(e.code));
     } finally {

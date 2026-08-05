@@ -42,27 +42,26 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('La pantalla de inicio lista los trayectos de prueba',
+  testWidgets('Sin sesión la pantalla invita a registrarse para guardar rutas',
       (WidgetTester tester) async {
     await pumpPhone(tester);
 
     expect(find.text('GoTravel RD'), findsOneWidget);
-    expect(find.text('Villa Mella'), findsOneWidget);
-    expect(find.text('Los Mina'), findsOneWidget);
-    expect(find.text('Naco'), findsOneWidget);
-    expect(find.text('DEMO'), findsWidgets);
+    expect(find.text('Regístrate para guardar rutas personalizadas'),
+        findsOneWidget);
+    expect(find.text('Registrarse'), findsOneWidget);
+    // Sin sesión no se listan rutas demo ni favoritas.
+    expect(find.text('DEMO'), findsNothing);
   });
 
-  testWidgets('Las tarjetas de trayecto exponen su acción a accesibilidad',
+  testWidgets('El botón "Registrarse" abre la pantalla de iniciar sesión',
       (WidgetTester tester) async {
-    final SemanticsHandle handle = tester.ensureSemantics();
     await pumpPhone(tester);
 
-    expect(
-      find.bySemanticsLabel('Ver viaje de Villa Mella a Los Mina'),
-      findsOneWidget,
-    );
-    handle.dispose();
+    await tester.tap(find.text('Registrarse'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Iniciar Sesión'), findsWidgets);
   });
 
   testWidgets('No hay desbordes de layout en pantalla estrecha (375 pt)',

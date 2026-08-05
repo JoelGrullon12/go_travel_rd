@@ -1,13 +1,13 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_travel_rd/application/providers.dart';
+import 'package:go_travel_rd/application/data_providers.dart';
 import 'package:go_travel_rd/core/theme/app_colors.dart';
 import 'package:go_travel_rd/core/theme/app_theme.dart';
-import 'package:go_travel_rd/core/utils/formatters.dart';
-import 'package:go_travel_rd/domain/models/trip_plan.dart';
-import 'package:go_travel_rd/features/shared/mode_visuals.dart';
+import 'package:go_travel_rd/models/user_route.dart';
 import 'package:go_travel_rd/services/auth_service.dart';
+import 'package:go_travel_rd/services/user_route_service.dart';
 import 'package:go_travel_rd/widgets/search_box.dart';
 
 import 'login_screen.dart';
@@ -16,15 +16,13 @@ import 'profile_screen.dart';
 
 /// Pantalla de entrada de la app (estilo Uber × Google Maps).
 ///
-/// Arriba, el buscador de origen/destino; debajo, la lista de rutas
-/// favoritas del usuario. Al tocar una ruta o al enviar origen/destino,
-/// se abre el mapa. Iniciar el viaje se hace desde el mapa, con un botón
-/// tipo "Iniciar Viaje" (ver [MapScreen]).
+/// Arriba, el buscador de origen/destino; debajo, las rutas personalizadas
+/// del usuario. Al tocar una ruta o al enviar origen/destino, se abre el mapa.
+/// Iniciar el viaje se hace desde el mapa, con un botón tipo "Iniciar Viaje"
+/// (ver [MapScreen]).
 ///
-/// Mientras el Hito 5 (favoritos en Firestore) no exista, la lista muestra
-/// los trayectos de prueba del Hito 4 con una marca DEMO. Cuando haya
-/// favoritos guardados, esta lista se llena desde `usuarios/{uid}/favoritos`
-/// y las tarjetas demo desaparecen.
+/// Sin sesión la lista se reemplaza por una invitación a registrarse: guardar
+/// rutas personalizadas requiere estar identificado (Hito 5).
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -54,14 +52,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.dispose();
   }
 
-  void _openMap({TripPlan? plan}) {
+  void _openMap() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => MapScreen(
-          plan: plan,
-          initialOrigin: plan?.originName ?? _originController.text,
-          initialDestination:
-              plan?.destinationName ?? _destinationController.text,
+          initialOrigin: _originController.text,
+          initialDestination: _destinationController.text,
         ),
       ),
     );
@@ -80,6 +76,105 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  /// Abre el mapa con una ruta personalizada guardada: el mapa lanza el motor
+  /// con su origen/destino y dibuja el plan recalculado.
+  Future<void> _openSavedRoute(UserRoute route) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => MapScreen(savedRoute: route)),
+    );
+    if (!mounted) return;
+    ref.invalidate(userRoutesProvider);
+  }
+
+  /// Diálogo para cambiar el nombre de una ruta guardada (Hito 5). Al renombrar
+  /// se borra la entrada con el nombre viejo (el CRUD deduplica por nombre) y
+  /// se guarda la ruta con el nuevo.
+  Future<void> _editRouteName(UserRoute route) async {
+    final TextEditingController controller =
+        TextEditingController(text: route.name);
+    final String? name = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Editar nombre'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            labelText: 'Nombre de la ruta',
+            hintText: 'Ej. Casa → Trabajo',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || name == route.name || !mounted) return;
+
+    try {
+      final UserRouteService service = UserRouteService();
+      await service.deleteRoute(route.name);
+      await service.saveRoute(route.copyWith(name: name));
+      ref.invalidate(userRoutesProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nombre actualizado')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo actualizar el nombre')),
+      );
+    }
+  }
+
+  /// Elimina una ruta guardada tras pedir confirmación.
+  Future<void> _deleteRoute(UserRoute route) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Eliminar ruta'),
+        content: Text('¿Eliminar "${route.name}"? Esta acción no se puede deshacer.'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    try {
+      await UserRouteService().deleteRoute(route.name);
+      ref.invalidate(userRoutesProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ruta eliminada')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo eliminar la ruta')),
+      );
+    }
+  }
+
   void _openProfile() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -88,10 +183,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  void _openRegister() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final TextTheme text = Theme.of(context).textTheme;
-    final List<TripPlan> plans = ref.watch(tripPlansProvider);
+    final AsyncValue<List<UserRoute>> routes = ref.watch(userRoutesProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -168,17 +269,43 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               style: text.bodySmall?.copyWith(color: AppColors.textTertiary),
             ),
             const SizedBox(height: Spacing.md),
-            if (plans.isEmpty)
-              _EmptyFavorites()
+            if (_user == null)
+              _SignUpPrompt(onRegister: _openRegister)
             else
-              for (final TripPlan plan in plans)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: Spacing.md),
-                  child: _PlanCard(
-                    plan: plan,
-                    onTap: () => _openMap(plan: plan),
+              routes.when(
+                loading: () => const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(Spacing.lg),
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                 ),
+                error: (Object e, StackTrace _) => _EmptyFavorites(
+                  message: 'No se pudieron cargar tus rutas. Inténtalo de nuevo.',
+                ),
+                data: (List<UserRoute> list) => list.isEmpty
+                    ? _EmptyFavorites(
+                        message:
+                            'Aún no guardas rutas favoritas. Calcula una ruta '
+                            'en el mapa y toca el botón de tres puntos para '
+                            'guardarla.',
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          for (final UserRoute route in list)
+                            Padding(
+                              padding:
+                                  const EdgeInsets.only(bottom: Spacing.md),
+                              child: _UserRouteCard(
+                                route: route,
+                                onTap: () => _openSavedRoute(route),
+                                onEditName: () => _editRouteName(route),
+                                onDelete: () => _deleteRoute(route),
+                              ),
+                            ),
+                        ],
+                      ),
+              ),
           ],
         ),
       ),
@@ -216,8 +343,59 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-/// Estado cuando todavía no hay rutas (favoritos del Hito 5 pendientes).
+/// Invitación a registrarse cuando no hay sesión: guardar rutas requiere estar
+/// identificado.
+class _SignUpPrompt extends StatelessWidget {
+  const _SignUpPrompt({required this.onRegister});
+
+  final VoidCallback onRegister;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextTheme text = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.all(Spacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: Radii.cardMd,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.bookmark_add_outlined,
+                  size: 18, color: AppColors.accent),
+              const SizedBox(width: Spacing.md),
+              Expanded(
+                child: Text(
+                  'Regístrate para guardar rutas personalizadas',
+                  style: text.bodyMedium?.copyWith(color: AppColors.textPrimary),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Spacing.lg),
+          SizedBox(
+            height: 44,
+            child: FilledButton(
+              onPressed: onRegister,
+              child: const Text('Registrarse'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Estado cuando el usuario tiene sesión pero todavía no guarda rutas.
 class _EmptyFavorites extends StatelessWidget {
+  const _EmptyFavorites({required this.message});
+
+  final String message;
+
   @override
   Widget build(BuildContext context) {
     final TextTheme text = Theme.of(context).textTheme;
@@ -235,8 +413,7 @@ class _EmptyFavorites extends StatelessWidget {
           const SizedBox(width: Spacing.md),
           Expanded(
             child: Text(
-              'Aún no guardas rutas favoritas. Cuando el Hito 5 esté listo, '
-              'las verás aquí.',
+              message,
               style: text.bodySmall?.copyWith(color: AppColors.textTertiary),
             ),
           ),
@@ -246,205 +423,129 @@ class _EmptyFavorites extends StatelessWidget {
   }
 }
 
-/// Tarjeta de una ruta: origen → destino, tramos, distancia, tarifa y
-/// transbordos. Es un solo botón para que el lector de pantalla anuncie una
-/// frase útil en lugar de siete fragmentos sueltos.
-class _PlanCard extends StatefulWidget {
-  const _PlanCard({required this.plan, required this.onTap});
+/// Acciones del menú de tres puntos de una ruta guardada.
+enum _RouteCardAction { editName, delete }
 
-  final TripPlan plan;
+/// Tarjeta de una ruta personalizada guardada: nombre, origen → destino y
+/// acciones (editar nombre, eliminar). Tocar la tarjeta abre el mapa y
+/// recalcula la ruta con el motor.
+class _UserRouteCard extends StatelessWidget {
+  const _UserRouteCard({
+    required this.route,
+    required this.onTap,
+    required this.onEditName,
+    required this.onDelete,
+  });
+
+  final UserRoute route;
   final VoidCallback onTap;
-
-  @override
-  State<_PlanCard> createState() => _PlanCardState();
-}
-
-class _PlanCardState extends State<_PlanCard> {
-  bool _pressed = false;
+  final VoidCallback onEditName;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
     final TextTheme text = Theme.of(context).textTheme;
-    final TripPlan plan = widget.plan;
+    final GeoPoint start = route.startLocation;
+    final GeoPoint finish = route.finishLocation;
 
-    return Semantics(
-      button: true,
-      container: true,
-      excludeSemantics: true,
-      label: 'Ver viaje de ${plan.originName} a ${plan.destinationName}',
-      value: '${Fmt.distance(plan.totalDistanceMeters)}, '
-          '${Fmt.money(plan.totalFareDop)}'
-          '${plan.transferCount > 0 ? ', ${plan.transferCount} transbordo'
-              '${plan.transferCount == 1 ? '' : 's'}' : ''}',
-      onTap: widget.onTap,
-      child: GestureDetector(
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapCancel: () => setState(() => _pressed = false),
-        onTapUp: (_) => setState(() => _pressed = false),
-        onTap: widget.onTap,
-        child: AnimatedScale(
-          scale: _pressed ? 0.978 : 1,
-          duration: const Duration(milliseconds: 90),
-          curve: Curves.easeOut,
-          child: Container(
-            padding: const EdgeInsets.all(Spacing.lg),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: Radii.cardLg,
-              border: Border.all(color: AppColors.border),
-              boxShadow: _pressed
-                  ? null
-                  : const <BoxShadow>[
-                      BoxShadow(
-                        color: Color(0x66000000),
-                        blurRadius: 28,
-                        offset: Offset(0, 12),
-                      ),
-                      BoxShadow(
-                        color: Color(0x40000000),
-                        blurRadius: 6,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(Spacing.lg),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: Radii.cardLg,
+          border: Border.all(color: AppColors.border),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(
+              color: Color(0x66000000),
+              blurRadius: 28,
+              offset: Offset(0, 12),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            BoxShadow(
+              color: Color(0x40000000),
+              blurRadius: 6,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
               children: <Widget>[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                Expanded(
+                  child: Text(route.name, style: text.titleLarge),
+                ),
+                PopupMenuButton<_RouteCardAction>(
+                  onSelected: (action) => switch (action) {
+                    _RouteCardAction.editName => onEditName(),
+                    _RouteCardAction.delete => onDelete(),
+                  },
+                  icon: const Icon(Icons.more_vert,
+                      size: 20, color: AppColors.textSecondary),
+                  tooltip: 'Opciones de la ruta',
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  itemBuilder: (BuildContext context) =>
+                      const <PopupMenuEntry<_RouteCardAction>>[
+                    PopupMenuItem<_RouteCardAction>(
+                      value: _RouteCardAction.editName,
+                      child: Row(
                         children: <Widget>[
-                          Text(plan.originName, style: text.titleLarge),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: <Widget>[
-                              const Icon(Icons.south_rounded,
-                                  size: 14, color: AppColors.textTertiary),
-                              const SizedBox(width: Spacing.sm),
-                              Expanded(
-                                child: Text(
-                                  plan.destinationName,
-                                  style: text.bodyMedium?.copyWith(
-                                    color: AppColors.textSecondary,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
+                          Icon(Icons.edit_outlined,
+                              size: 18, color: AppColors.textPrimary),
+                          SizedBox(width: 10),
+                          Text('Editar nombre'),
                         ],
                       ),
                     ),
-                    _DemoBadge(),
-                  ],
-                ),
-                const SizedBox(height: Spacing.lg),
-                Wrap(
-                  spacing: Spacing.sm,
-                  runSpacing: Spacing.sm,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    for (int i = 0; i < plan.legs.length; i++) ...<Widget>[
-                      _LegChip(leg: plan.legs[i]),
-                      if (i != plan.legs.length - 1)
-                        const Icon(Icons.chevron_right_rounded,
-                            size: 14, color: AppColors.textTertiary),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: Spacing.lg),
-                Wrap(
-                  spacing: Spacing.md,
-                  runSpacing: Spacing.sm,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    Text(
-                      Fmt.distance(plan.totalDistanceMeters),
-                      style: AppTheme.numeric(15,
-                          color: AppColors.textSecondary,
-                          weight: FontWeight.w500),
-                    ),
-                    Text(
-                      Fmt.money(plan.totalFareDop),
-                      style: AppTheme.numeric(15,
-                          color: AppColors.textSecondary,
-                          weight: FontWeight.w500),
-                    ),
-                    if (plan.transferCount > 0)
-                      Text(
-                        plan.transferCount == 1
-                            ? '1 transbordo'
-                            : '${plan.transferCount} transbordos',
-                        style: text.bodySmall
-                            ?.copyWith(color: AppColors.textTertiary),
+                    PopupMenuItem<_RouteCardAction>(
+                      value: _RouteCardAction.delete,
+                      child: Row(
+                        children: <Widget>[
+                          Icon(Icons.delete_outline,
+                              size: 18, color: AppColors.textPrimary),
+                          SizedBox(width: 10),
+                          Text('Eliminar'),
+                        ],
                       ),
+                    ),
                   ],
                 ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DemoBadge extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: Spacing.sm, vertical: Spacing.xs),
-        decoration: BoxDecoration(
-          color: AppColors.warning.withValues(alpha: 0.14),
-          borderRadius: Radii.cardSm,
-          border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
-        ),
-        child: Text(
-          'DEMO',
-          style: Theme.of(context)
-              .textTheme
-              .labelSmall
-              ?.copyWith(color: AppColors.warning),
-        ),
-      );
-}
-
-class _LegChip extends StatelessWidget {
-  const _LegChip({required this.leg});
-
-  final TripLeg leg;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color color = Color(leg.lineColorHex);
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: Spacing.md, vertical: Spacing.xs),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
-        borderRadius: Radii.cardSm,
-        border: Border.all(color: color.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(iconForMode(leg.mode), size: 13, color: color),
-          if (!leg.mode.isWalking) ...<Widget>[
-            const SizedBox(width: Spacing.xs),
+            const SizedBox(height: Spacing.sm),
             Text(
-              leg.lineName.replaceFirst('Metro ', ''),
-              style: Theme.of(context)
-                  .textTheme
-                  .labelSmall
-                  ?.copyWith(color: color, letterSpacing: 0.2),
+              _coordLabel(start),
+              style: text.bodyMedium?.copyWith(color: AppColors.textSecondary),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            Row(
+              children: <Widget>[
+                const Icon(Icons.south_rounded,
+                    size: 14, color: AppColors.textTertiary),
+                const SizedBox(width: Spacing.sm),
+                Expanded(
+                  child: Text(
+                    _coordLabel(finish),
+                    style: text.bodyMedium?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
           ],
-        ],
+        ),
       ),
     );
   }
+
+  static String _coordLabel(GeoPoint p) =>
+      '${p.latitude.toStringAsFixed(5)}, ${p.longitude.toStringAsFixed(5)}';
 }

@@ -1,13 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class FavoriteCustomRoute {
+class UserRoute {
   final String id;
   final String name;
   final GeoPoint startLocation;
   final GeoPoint finishLocation;
   final String preferredTransportTypeId;
 
-  const FavoriteCustomRoute({
+  const UserRoute({
     required this.id,
     required this.name,
     required this.startLocation,
@@ -15,13 +15,13 @@ class FavoriteCustomRoute {
     required this.preferredTransportTypeId,
   });
 
-  factory FavoriteCustomRoute.fromSnapshot(DocumentSnapshot doc) {
+  factory UserRoute.fromSnapshot(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
-    return FavoriteCustomRoute.fromMap(data, doc.id);
+    return UserRoute.fromMap(data, doc.id);
   }
 
-  factory FavoriteCustomRoute.fromMap(Map<String, dynamic> map, String id) =>
-      FavoriteCustomRoute(
+  factory UserRoute.fromMap(Map<String, dynamic> map, String id) =>
+      UserRoute(
         id: id,
         name: map['name'] as String? ?? '',
         startLocation:
@@ -39,13 +39,13 @@ class FavoriteCustomRoute {
         'preferredTransportTypeId': preferredTransportTypeId,
       };
 
-  FavoriteCustomRoute copyWith({
+  UserRoute copyWith({
     String? name,
     GeoPoint? startLocation,
     GeoPoint? finishLocation,
     String? preferredTransportTypeId,
   }) =>
-      FavoriteCustomRoute(
+      UserRoute(
         id: id,
         name: name ?? this.name,
         startLocation: startLocation ?? this.startLocation,

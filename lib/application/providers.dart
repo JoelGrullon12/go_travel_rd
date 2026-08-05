@@ -1,17 +1,16 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/fixtures/demo_trip_plans.dart';
 import '../domain/models/trip_plan.dart';
 import 'live_trip_controller.dart';
 import 'planner_controller.dart';
 
 /// Fuente de planes de viaje.
 ///
-/// ── ÚNICA COSTURA CON EL HITO 2 ───────────────────────────────────────────
-/// Hoy devuelve planes de ejemplo. Cuando el motor de cálculo A→B esté listo,
-/// se sobreescribe este provider (o se cambia su cuerpo) para que devuelva lo
-/// que calcule el motor. Ningún widget ni el motor de seguimiento se enteran:
-/// ambos solo conocen [TripPlan].
+/// ── SEAM DEL HITO 2 ────────────────────────────────────────────────────────
+/// Hoy devuelve una lista vacía: todos los planes llegan del motor A→B
+/// ([plannerControllerProvider]) o de rutas personalizadas que se recalculan
+/// con el motor al abrirse (Hito 5). Ningún widget ni el motor de seguimiento
+/// se enteran: ambos solo conocen [TripPlan].
 ///
 /// ```dart
 /// final tripPlansProvider = Provider<List<TripPlan>>((ref) {
@@ -20,16 +19,17 @@ import 'planner_controller.dart';
 /// ```
 /// ──────────────────────────────────────────────────────────────────────────
 final Provider<List<TripPlan>> tripPlansProvider =
-    Provider<List<TripPlan>>((ref) => DemoTripPlans.all());
+    Provider<List<TripPlan>>((ref) => const <TripPlan>[]);
 
 /// Busca un plan por id. Lanza si no existe: un id inválido es un bug de
 /// navegación, no un estado que la UI deba manejar.
 ///
 /// Orden de búsqueda:
-/// 1. Planes demo / favoritos ([tripPlansProvider]) — el Hito 5 llenará esta
-///    lista desde Firestore cuando exista.
+/// 1. Planes conocidos ([tripPlansProvider]) — hoy vacío; el Hito 5 podría
+///    llenarlo con rutas guardadas si se decide serializarlas.
 /// 2. Plan calculado por el motor A→B ([plannerControllerProvider]) — así el
-///    viaje activo puede arrancar desde un plan recién calculado en el mapa.
+///    viaje activo puede arrancar desde un plan recién calculado en el mapa o
+///    desde una ruta personalizada recalculada al abrirla.
 final ProviderFamily<TripPlan, String> tripPlanProvider =
     Provider.family<TripPlan, String>((ref, String planId) {
   final List<TripPlan> known = ref.watch(tripPlansProvider);

@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:go_travel_rd/data/fixtures/demo_trip_plans.dart';
 import 'package:go_travel_rd/domain/models/trip_instruction.dart';
 import 'package:go_travel_rd/domain/models/trip_plan.dart';
 import 'package:go_travel_rd/domain/tracking/instruction_engine.dart';
 import 'package:go_travel_rd/domain/tracking/trip_geometry.dart';
 
+import 'support/demo_trip_plans.dart';
 import 'support/test_plans.dart';
 
 void main() {

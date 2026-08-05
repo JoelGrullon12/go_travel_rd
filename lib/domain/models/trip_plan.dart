@@ -122,8 +122,8 @@ class TripLeg {
 /// ── CONTRATO CON EL HITO 2 ────────────────────────────────────────────────
 /// Este es el objeto que el motor de cálculo de ruta (Hito 2) le entrega al
 /// seguimiento en tiempo real (Hito 4). El Hito 4 NO calcula rutas: las
-/// consume. Mientras el Hito 2 no exista, `lib/data/fixtures/` provee planes
-/// de ejemplo con coordenadas reales del Metro de Santo Domingo.
+/// consume. Los planes realistas para los tests viven en
+/// `test/support/demo_trip_plans.dart`.
 ///
 /// Para conectar el motor real basta con que devuelva un `TripPlan`
 /// (o su JSON, vía [TripPlan.fromJson]). Nada más de esta capa cambia.

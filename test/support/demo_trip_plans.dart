@@ -1,7 +1,7 @@
-import '../../domain/geo/geo_point.dart';
-import '../../domain/models/transport_mode.dart';
-import '../../domain/models/trip_plan.dart';
-import '../metro_stations.dart';
+import 'package:go_travel_rd/data/metro_stations.dart';
+import 'package:go_travel_rd/domain/geo/geo_point.dart';
+import 'package:go_travel_rd/domain/models/transport_mode.dart';
+import 'package:go_travel_rd/domain/models/trip_plan.dart';
 
 /// Planes de viaje de ejemplo.
 ///

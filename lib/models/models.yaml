@@ -27,9 +27,9 @@ User  # collection: users, doc id = Firebase Auth uid
 - favoriteTransportTypeIds: array<string>
 - maxWalkDistance: float
 - routePreference: string          // "price" | "speed" | "distance"
+- userRoutes: array<map>           // array of userRoutes
 
-# users/{uid}/favoriteRoutes/{routeId}          -> doc id = routeId itself, body can be empty or { addedAt }
-# users/{uid}/favoriteCustomRoutes/{id}
+# users/{uid}/userRoutes/{id}
 - name: string                     // "Home-Work", "Trip to the countryside"
 - startLocation: geopoint
 - finishLocation: geopoint

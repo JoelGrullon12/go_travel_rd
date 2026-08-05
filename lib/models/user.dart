@@ -1,3 +1,5 @@
+import 'user_route.dart';
+
 class AppUser {
   final String uid;
   final String email;
@@ -6,6 +8,7 @@ class AppUser {
   final double maxWalkDistance;
   final String routePreference;
   final String? photoUrl;
+  final List<UserRoute> userRoutes;
 
   const AppUser({
     required this.uid,
@@ -15,6 +18,7 @@ class AppUser {
     this.maxWalkDistance = 1500.0,
     this.routePreference = 'speed',
     this.photoUrl,
+    this.userRoutes = const [],
   });
 
   Map<String, dynamic> toMap() => {
@@ -25,6 +29,7 @@ class AppUser {
         'maxWalkDistance': maxWalkDistance,
         'routePreference': routePreference,
         'photoUrl': photoUrl,
+        'userRoutes': userRoutes.map((r) => r.toMap()).toList(),
       };
 
   factory AppUser.fromMap(Map<String, dynamic> map, String uid) => AppUser(
@@ -36,6 +41,10 @@ class AppUser {
         maxWalkDistance: (map['maxWalkDistance'] as num?)?.toDouble() ?? 1500.0,
         routePreference: map['routePreference'] as String? ?? 'speed',
         photoUrl: map['photoUrl'] as String?,
+        userRoutes: (map['userRoutes'] as List? ?? [])
+            .whereType<Map>()
+            .map((e) => UserRoute.fromMap(e.cast<String, dynamic>(), ''))
+            .toList(),
       );
 
   AppUser copyWith({
@@ -46,6 +55,7 @@ class AppUser {
     double? maxWalkDistance,
     String? routePreference,
     String? photoUrl,
+    List<UserRoute>? userRoutes,
   }) =>
       AppUser(
         uid: uid ?? this.uid,
@@ -56,5 +66,6 @@ class AppUser {
         maxWalkDistance: maxWalkDistance ?? this.maxWalkDistance,
         routePreference: routePreference ?? this.routePreference,
         photoUrl: photoUrl ?? this.photoUrl,
+        userRoutes: userRoutes ?? this.userRoutes,
       );
 }

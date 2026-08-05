@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:go_travel_rd/data/fixtures/demo_trip_plans.dart';
 import 'package:go_travel_rd/domain/geo/geo_math.dart';
 import 'package:go_travel_rd/domain/geo/geo_point.dart';
 import 'package:go_travel_rd/domain/models/location_sample.dart';
@@ -7,6 +6,7 @@ import 'package:go_travel_rd/domain/models/trip_instruction.dart';
 import 'package:go_travel_rd/domain/models/trip_progress.dart';
 import 'package:go_travel_rd/domain/tracking/trip_tracker.dart';
 
+import 'support/demo_trip_plans.dart';
 import 'support/test_plans.dart';
 
 /// Recorre el plan completo alimentando al tracker como lo haría el GPS y

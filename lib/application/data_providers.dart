@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/route.dart';
 import '../models/user.dart';
+import '../models/user_route.dart';
 import '../services/auth_service.dart';
 import '../services/route_service.dart';
+import '../services/user_route_service.dart';
 
 /// Distancia máxima a pie por defecto (1500 m ≈ 18 min caminando) cuando el
 /// usuario no tiene la preferencia guardada. Es la única fuente del valor por
@@ -34,3 +36,10 @@ final FutureProvider<double> maxWalkDistanceProvider =
   final AppUser? user = await AuthService().getUserData(firebaseUser.uid);
   return user?.maxWalkDistance ?? kDefaultMaxWalkMeters;
 });
+
+/// Rutas personalizadas del usuario actual (Hito 5). Vacío sin sesión o sin
+/// rutas guardadas.
+final FutureProvider<List<UserRoute>> userRoutesProvider =
+    FutureProvider<List<UserRoute>>(
+  (ref) => UserRouteService().getUserRoutes(),
+);
