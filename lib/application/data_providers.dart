@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../domain/models/trip_plan.dart';
+import '../domain/routing/route_preferences.dart';
 import '../models/route.dart';
 import '../models/transport_type.dart';
 import '../models/trip_history_entry.dart';
@@ -41,6 +43,21 @@ final FutureProvider<double> maxWalkDistanceProvider =
   return user?.maxWalkDistance ?? kDefaultMaxWalkMeters;
 });
 
+/// Preferencias de viaje del usuario (preferencia de ruta + tipo de transporte
+/// favorito) para el motor A→B. Sin sesión o sin datos, usa los defaults
+/// (`speed`, sin tipo favorito) que reproducen exactamente el motor original.
+final FutureProvider<RoutePreferences> userPreferencesProvider =
+    FutureProvider<RoutePreferences>((ref) async {
+  final FirebaseAuth auth = FirebaseAuth.instance;
+  final User? firebaseUser = auth.currentUser;
+  if (firebaseUser == null) return const RoutePreferences();
+  final AppUser? user = await AuthService().getUserData(firebaseUser.uid);
+  return RoutePreferences(
+    routePreference: user?.routePreference ?? 'speed',
+    favoriteTransportTypeId: user?.favoriteTransportTypeId,
+  );
+});
+
 /// Rutas personalizadas del usuario actual (Hito 5). Vacío sin sesión o sin
 /// rutas guardadas.
 final FutureProvider<List<UserRoute>> userRoutesProvider =
@@ -61,3 +78,9 @@ final FutureProvider<List<TransportType>> transportTypesProvider =
     FutureProvider<List<TransportType>>(
   (ref) => TransportTypeService().getTransportTypes(),
 );
+
+/// Último viaje terminado, para el widget "Viaje terminado" de la pantalla
+/// principal. `LiveTripScreen` lo publica al cerrar (llegada o finalización
+/// manual) y la tarjeta lo limpia con "Cerrar".
+final StateProvider<TripPlan?> finishedTripProvider =
+    StateProvider<TripPlan?>((ref) => null);

@@ -24,7 +24,7 @@ Station  # collection: stations
 User  # collection: users, doc id = Firebase Auth uid
 - email: string
 - name: string
-- favoriteTransportTypeIds: array<string>
+- favoriteTransportTypeId: string | null     // un solo tipo (radio); null = ninguno
 - maxWalkDistance: float
 - routePreference: string          // "price" | "speed" | "distance"
 - userRoutes: array<map>           // array of userRoutes

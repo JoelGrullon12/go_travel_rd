@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_travel_rd/application/data_providers.dart';
 import 'package:go_travel_rd/core/theme/app_colors.dart';
 import 'package:go_travel_rd/core/theme/app_theme.dart';
+import 'package:go_travel_rd/core/utils/formatters.dart';
+import 'package:go_travel_rd/domain/models/trip_plan.dart';
 import 'package:go_travel_rd/models/user_route.dart';
 import 'package:go_travel_rd/services/auth_service.dart';
 import 'package:go_travel_rd/services/user_route_service.dart';
@@ -184,6 +186,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final TextTheme text = Theme.of(context).textTheme;
     final AsyncValue<List<UserRoute>> routes = ref.watch(userRoutesProvider);
+    final TripPlan? finishedTrip = ref.watch(finishedTripProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -219,6 +222,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ],
             ),
             const SizedBox(height: Spacing.xxl),
+
+            // ── Viaje terminado ───────────────────────────────────────────
+            if (finishedTrip != null) ...<Widget>[
+              _FinishedTripCard(
+                plan: finishedTrip,
+                onClose: () {
+                  ref.read(finishedTripProvider.notifier).state = null;
+                },
+              ),
+              const SizedBox(height: Spacing.xxl),
+            ],
 
             // ── Buscador de origen / destino ──────────────────────────────
             // Los campos abren el mapa para marcar el punto con el pin; el
@@ -301,6 +315,132 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
   }
+}
+
+/// Tarjeta "Viaje terminado": resumen del último viaje (origen, destino,
+/// precio y distancia) con un botón para descartarla. Se muestra en la
+/// pantalla principal cuando [finishedTripProvider] tiene un plan.
+class _FinishedTripCard extends StatelessWidget {
+  const _FinishedTripCard({required this.plan, required this.onClose});
+
+  final TripPlan plan;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextTheme text = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.all(Spacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: Radii.cardLg,
+        border: Border.all(color: AppColors.border),
+        boxShadow: Shadows.card,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.check_circle_rounded,
+                  size: 18, color: AppColors.accent),
+              const SizedBox(width: Spacing.sm),
+              Text('Viaje terminado', style: text.titleMedium),
+            ],
+          ),
+          const SizedBox(height: Spacing.md),
+          _TripLine(icon: Icons.trip_origin, label: plan.originName),
+          const SizedBox(height: Spacing.xs),
+          _TripLine(
+            icon: Icons.place_rounded,
+            label: plan.destinationName,
+            accent: true,
+          ),
+          const SizedBox(height: Spacing.lg),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _SummaryStat(
+                  label: 'Precio',
+                  value: Fmt.money(plan.totalFareDop),
+                ),
+              ),
+              Expanded(
+                child: _SummaryStat(
+                  label: 'Distancia',
+                  value: Fmt.distance(plan.totalDistanceMeters),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Spacing.lg),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: OutlinedButton(
+              onPressed: onClose,
+              child: const Text('Cerrar'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Fila origen/destino de la tarjeta de viaje terminado.
+class _TripLine extends StatelessWidget {
+  const _TripLine({required this.icon, required this.label, this.accent = false});
+
+  final IconData icon;
+  final String label;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = accent ? AppColors.accent : AppColors.textTertiary;
+    return Row(
+      children: <Widget>[
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: Spacing.sm),
+        Expanded(
+          child: Text(
+            label,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: AppColors.textSecondary),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Stat pequeño (etiqueta + valor) para la fila de precio/distancia.
+class _SummaryStat extends StatelessWidget {
+  const _SummaryStat({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            label.toUpperCase(),
+            style: Theme.of(context)
+                .textTheme
+                .labelSmall
+                ?.copyWith(color: AppColors.textTertiary),
+          ),
+          const SizedBox(height: Spacing.xs),
+          Text(value, style: AppTheme.numeric(19)),
+        ],
+      );
 }
 
 /// Invitación a registrarse cuando no hay sesión: guardar rutas requiere estar

@@ -5,6 +5,7 @@ import '../geo/geo_math.dart';
 import '../geo/geo_point.dart';
 import '../models/transport_mode.dart';
 import '../models/trip_plan.dart';
+import 'route_preferences.dart';
 import 'station_graph.dart';
 
 /// Color por defecto de las líneas de buses (OMSA/corredores/teleférico).
@@ -48,6 +49,49 @@ class RoutePlanOutcome {
   final RoutePlanFailure? failure;
 }
 
+/// Penalización (en minutos) por **abordar** un modo de transporte que no es
+/// el favorito del usuario ([RoutePreferences.favoriteTransportTypeId]).
+///
+/// Es un sobrecosto dentro del grafo: hace que el tipo preferido salga
+/// favorecido sin tocar los minutos/tarifas reales que se muestran en el plan.
+/// ~15 min ≈ un headway promedio del transporte en Santo Domingo.
+const double kModePenaltyMinutes = 15;
+
+/// Pesos del **costo generalizado** según la preferencia de viaje
+/// ([RoutePreferences.routePreference]). El costo de una arista es:
+///
+///   time × minutos + distanceKm × km + valueOfTimeDop × tarifa + penalización
+///
+/// · `speed`: solo minutos (reproduce el motor original).
+/// · `price`: la tarifa domina; el tiempo es desempate.
+/// · `distance`: los kilómetros dominan; el tiempo es desempate.
+class _CostWeights {
+  const _CostWeights({
+    required this.time,
+    required this.valueOfTimeDop,
+    required this.distanceKm,
+  });
+
+  final double time;
+  final double valueOfTimeDop;
+  final double distanceKm;
+
+  static _CostWeights forPreference(String routePreference) =>
+      switch (routePreference) {
+        'price' => const _CostWeights(
+            time: 0.35,
+            valueOfTimeDop: 5.0,
+            distanceKm: 0.0,
+          ),
+        'distance' => const _CostWeights(
+            time: 0.35,
+            valueOfTimeDop: 1.0,
+            distanceKm: 1.0,
+          ),
+        _ => const _CostWeights(time: 1.0, valueOfTimeDop: 0.0, distanceKm: 0.0),
+      };
+}
+
 /// Motor de cálculo de ruta A→B (Hito 2).
 ///
 /// Lógica pura, sin Flutter: se prueba con `flutter test`. Opera sobre las
@@ -55,22 +99,30 @@ class RoutePlanOutcome {
 /// que consume el seguimiento en tiempo real (Hito 4).
 ///
 /// ## Objetivo
-/// Menor tiempo total estimado:
-///   caminata al origen + suma de minutos por tramo + caminata al destino.
+/// Minimizar el **costo generalizado** total, que por defecto es el tiempo
+/// estimado (caminata al origen + minutos por tramo + caminata al destino) y
+/// con preferencias suma tarifa y sesgo de modo preferido
+/// ([RoutePreferences]): "más rápido" pondera solo tiempo, "más barato"
+/// pondera la tarifa y "más corto" los kilómetros; el tipo favorito se premia
+/// penalizando el abordaje de los demás.
 ///
 /// ## Cómo busca
 /// 1. Estaciones alcanzables a pie (≤ `maxWalkMeters`) desde origen y destino.
 /// 2. Un solo **Dijkstra multi-fuente** sobre el [StationGraph], arrancando de
 ///    una fuente virtual conectada a cada estación de abordaje (peso = caminata
-///    desde el origen). Así se obtiene el mejor tiempo a **todos** los destinos
-///    en una pasada —O((V+E) log V)— en vez de correr un Dijkstra por cada par
-///    (abordaje × bajada), que con distancia a pie ∞ disparaba B×A ejecuciones
-///    y congelaba la UI.
+///    ponderada desde el origen). Así se obtiene el mejor costo a **todos** los
+///    destinos en una pasada —O((V+E) log V)— en vez de correr un Dijkstra por
+///    cada par (abordaje × bajada), que con distancia a pie ∞ disparaba B×A
+///    ejecuciones y congelaba la UI.
 /// 3. Gana el mejor destino de bajada. Los transbordos —caminatas cortas entre
 ///    estaciones cercanas o el pasillo de una estación compartida— se suman
 ///    como tramos a pie dentro del grafo.
 /// 4. Si origen y destino están lo bastante cerca, caminar directo compite con
 ///    el transporte y puede ganarle.
+///
+/// El [TripPlan] resultante siempre reporta **valores reales** (minutos,
+/// tarifa y distancia de sus tramos); el costo generalizado solo decide el
+/// camino dentro del grafo.
 class RouteEngine {
   const RouteEngine();
 
@@ -79,7 +131,15 @@ class RouteEngine {
     required GeoPoint destination,
     required List<Route> routes,
     required double maxWalkMeters,
+    RoutePreferences preferences = const RoutePreferences(),
   }) {
+    final _CostWeights weights =
+        _CostWeights.forPreference(preferences.routePreference);
+    final String? favoriteTypeId = preferences.favoriteTransportTypeId;
+    final double modePenalty = preferences.hasFavoriteType
+        ? kModePenaltyMinutes
+        : 0.0;
+
     final List<Route> fixedRoutes = routes
         .where(
           (Route r) =>
@@ -112,25 +172,40 @@ class RouteEngine {
     }
 
     // Dijkstra multi-fuente: una sola pasada desde una fuente virtual conectada
-    // a cada estación de abordaje (peso = minutos caminando desde el origen).
+    // a cada estación de abordaje (peso = caminata ponderada desde el origen).
     // `dist[alight]` queda = min sobre los abordajes de (caminata + viaje), que
     // es exactamente lo que antes calculaba el doble bucle de Dijkstras, pero
-    // sin repetir trabajo por cada par (abordaje × bajada).
+    // sin repetir trabajo por cada par (abordaje × bajada). Con `cost`, cada
+    // arista usa el costo generalizado (tiempo + tarifa + modo preferido); el
+    // plan mostrado sigue reportando los valores reales de sus tramos.
     final DijkstraResult dijkstra = graph.dijkstraFrom(<(String, double)>[
       for (final GraphNode board in boardCandidates)
-        (board.id, _walkMinutes(distanceMeters(origin, board.position))),
-    ]);
+        (
+          board.id,
+          _weightedWalk(weights, distanceMeters(origin, board.position)),
+        ),
+    ], cost: (GraphEdge? incoming, GraphEdge edge) {
+      return _edgeCost(
+        graph: graph,
+        weights: weights,
+        modePenalty: modePenalty,
+        favoriteTypeId: favoriteTypeId,
+        incoming: incoming,
+        edge: edge,
+      );
+    });
 
     double? bestCost;
     PathResult? bestPath;
     bool walkOnly = false;
 
     // Plan alternativo a pie: si el destino queda dentro de la distancia
-    // máxima a pie, caminar directo puede ganarle al transporte.
+    // máxima a pie, caminar directo puede ganarle al transporte. Se compara en
+    // el mismo costo generalizado (caminar no cobra tarifa ni penaliza modo).
     final double directWalk = distanceMeters(origin, destination);
     if (directWalk <= maxWalkMeters) {
       walkOnly = true;
-      bestCost = _walkMinutes(directWalk);
+      bestCost = _weightedWalk(weights, directWalk);
     }
 
     for (final GraphNode alight in alightCandidates) {
@@ -142,8 +217,8 @@ class RouteEngine {
       // caminar al punto y volver, siempre ≥ caminar directo. Se descarta.
       if (!dijkstra.prevEdge.containsKey(alight.id)) continue;
 
-      final double cost =
-          dist + _walkMinutes(distanceMeters(alight.position, destination));
+      final double cost = dist +
+          _weightedWalk(weights, distanceMeters(alight.position, destination));
       if (bestCost == null || cost < bestCost) {
         bestCost = cost;
         bestPath = graph.pathTo(dijkstra, alight.id);
@@ -170,6 +245,60 @@ class RouteEngine {
         : _walkOnlyPlan(origin, destination);
     return RoutePlanOutcome.success(plan);
   }
+
+  /// Costo generalizado de recorrer `edge` saliendo del nodo alcanzado por
+  /// `incoming` ([EdgeCost]).
+  ///
+  /// - Aristas de transbordo a pie: solo tiempo/distancia ponderados.
+  /// - Aristas de vehículo: tiempo/distancia ponderados, y si la arista es un
+  ///   **abordaje** (cambia de ruta o es la primera de la búsqueda) se suma la
+  ///   tarifa ponderada y, si el modo no es el favorito, la penalización.
+  ///
+  /// Excepción: cambiar de ruta **dentro de una misma estación** (transbordo
+  /// en estación compartida, ej. Juan Pablo Duarte L1/L2) no cobra una segunda
+  /// tarifa — el pasaje del Metro se paga una sola vez aunque se transborde.
+  /// La penalización de modo preferido sí se mantiene: es un sesgo de
+  /// preferencia, no un cobro.
+  double _edgeCost({
+    required StationGraph graph,
+    required _CostWeights weights,
+    required double modePenalty,
+    required String? favoriteTypeId,
+    required GraphEdge? incoming,
+    required GraphEdge edge,
+  }) {
+    final double km = distanceMeters(
+          graph.node(edge.fromId)!.position,
+          graph.node(edge.toId)!.position,
+        ) /
+        1000.0;
+    double cost = weights.time * edge.minutes + weights.distanceKm * km;
+
+    if (edge.routeId == kTransferRouteId) return cost;
+
+    final bool boarding = incoming == null || incoming.routeId != edge.routeId;
+    if (!boarding) return cost;
+
+    final Route route = graph.routeById(edge.routeId)!;
+    final bool inStationTransfer =
+        incoming != null &&
+        incoming.routeId != kTransferRouteId &&
+        graph.node(edge.fromId)!.routeIds.contains(incoming.routeId) &&
+        graph.node(edge.fromId)!.routeIds.contains(edge.routeId);
+    if (!inStationTransfer) {
+      cost += weights.valueOfTimeDop * route.price;
+    }
+    if (modePenalty > 0 && route.transportTypeId != favoriteTypeId) {
+      cost += modePenalty;
+    }
+    return cost;
+  }
+
+  /// Caminata (metros) convertida al costo generalizado: tiempo ponderado +
+  /// kilómetros ponderados. Caminar no cobra tarifa ni penaliza modo.
+  static double _weightedWalk(_CostWeights weights, double meters) =>
+      weights.time * _walkMinutes(meters) +
+      weights.distanceKm * meters / 1000.0;
 
   /// Convierte un camino del grafo en un [TripPlan]: un tramo a pie al
   /// abordaje, un tramo de transporte por cada ruta consecutiva del camino,
@@ -226,6 +355,18 @@ class RouteEngine {
       ];
       final TransportMode mode = transportModeForTypeId(route.transportTypeId);
 
+      // Transbordo en estación compartida: el plan llega a esta ruta sin pasar
+      // por un tramo a pie de transbordo, y la estación de abordaje pertenece a
+      // la ruta anterior y a la actual (ej. Juan Pablo Duarte en L1/L2). El
+      // pasaje se cobra una sola vez: este tramo no suma tarifa.
+      final bool inStationTransfer = edgeIndex > 0 &&
+          path.edges[edgeIndex - 1].routeId != kTransferRouteId &&
+          path.edges[edgeIndex - 1].routeId != routeId &&
+          graph.node(path.nodeIds[edgeIndex])!.routeIds.contains(
+                path.edges[edgeIndex - 1].routeId,
+              ) &&
+          graph.node(path.nodeIds[edgeIndex])!.routeIds.contains(routeId);
+
       // Marcar como transbordo las paradas limítrofes cuando el camino entra o
       // sale caminando hacia otra ruta (para el badge "transbordo" en la UI).
       final bool entersViaWalkTransfer =
@@ -255,11 +396,11 @@ class RouteEngine {
                     (i == stations.length - 1 && exitsViaWalkTransfer),
               ),
           ],
-          // Tarifa de la ruta. Cada tramo cobra su pasaje: un transbordo entre
-          // sistemas (Metro → OMSA) suma dos tarifas a propósito. El Metro real
-          // se paga una sola vez aunque se transborde en la misma estación; ese
-          // descuento queda como deuda del motor (AGENTS.md).
-          fareDop: route.price,
+          // Tarifa de la ruta. Cada tramo cobra su pasaje: un transbordo a pie
+          // entre sistemas (Metro → OMSA) suma dos tarifas a propósito. Un
+          // transbordo dentro de la misma estación compartida (ej. L1 → L2 en
+          // Juan Pablo Duarte) no cobra la segunda: el pasaje se paga una vez.
+          fareDop: inStationTransfer ? 0 : route.price,
           // La frecuencia no vive en Firestore todavía; sin espera estimada.
           headwayMinutes: 0,
         ),

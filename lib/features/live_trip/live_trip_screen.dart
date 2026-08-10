@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../application/data_providers.dart';
 import '../../application/live_trip_controller.dart';
 import '../../application/providers.dart';
 import '../../core/theme/app_colors.dart';
@@ -68,6 +69,18 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen> {
         HapticFeedback.mediumImpact();
       case InstructionUrgency.calm:
         break;
+    }
+  }
+
+  /// Termina el viaje: publica el plan en [finishedTripProvider] para que la
+  /// pantalla principal muestre el resumen y vuelve a la raíz del navegador
+  /// (el shell, en la pestaña Inicio). Cierra la fuente de ubicación antes de
+  /// navegar; el `autoDispose` del controller haría lo mismo al desmontar.
+  Future<void> _finishTrip(LiveTripController controller) async {
+    await controller.stop();
+    ref.read(finishedTripProvider.notifier).state = controller.tracker.geometry.plan;
+    if (mounted) {
+      Navigator.of(context).popUntil((Route<dynamic> route) => route.isFirst);
     }
   }
 
@@ -146,17 +159,20 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen> {
             ),
           ),
 
-          if (!_followUser && progress != null)
-            Positioned(
-              right: Spacing.lg,
-              bottom: screenHeight * _sheetMin + Spacing.lg,
-              child: _RecenterButton(
-                onTap: () {
-                  setState(() => _followUser = true);
-                  _mapKey.currentState?.recenter();
-                },
-              ),
+          // FAB de re-centrado: siempre visible. Si el usuario movió el mapa
+          // (`_followUser == false`) se pinta en accent como aviso de que el
+          // seguimiento se soltó; al tocar, re-enlaza la cámara al usuario.
+          Positioned(
+            right: Spacing.lg,
+            bottom: screenHeight * _sheetMin + Spacing.lg,
+            child: _RecenterFab(
+              isFollowing: _followUser,
+              onTap: () {
+                setState(() => _followUser = true);
+                _mapKey.currentState?.recenter();
+              },
             ),
+          ),
 
           DraggableScrollableSheet(
             initialChildSize: _sheetInitial,
@@ -169,10 +185,7 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen> {
               scrollController: scrollController,
               geometry: controller.tracker.geometry,
               progress: progress,
-              onEndTrip: () async {
-                await controller.stop();
-                if (context.mounted) Navigator.of(context).pop();
-              },
+              onEndTrip: () => _finishTrip(controller),
               demoControls: state.isSimulated
                   ? DemoControls(
                       speed: state.simulationSpeed,
@@ -208,10 +221,7 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen> {
                 progress: progress,
                 elapsed: DateTime.now()
                     .difference(_startedAt ?? DateTime.now()),
-                onClose: () async {
-                  await controller.stop();
-                  if (context.mounted) Navigator.of(context).pop();
-                },
+                onClose: () => _finishTrip(controller),
                 onRestart: () {
                   setState(() {
                     _arrivalDismissed = false;
@@ -380,9 +390,15 @@ class _GlassIconButton extends StatelessWidget {
       );
 }
 
-class _RecenterButton extends StatelessWidget {
-  const _RecenterButton({required this.onTap});
+/// FAB circular de re-centrado: siempre visible, abajo a la derecha.
+///
+/// Cuando el mapa sigue al usuario el FAB es neutro; cuando el usuario movió
+/// el mapa (se soltó el seguimiento) se pinta en accent para que el botón se
+/// note. Al tocar, la cámara vuelve a centrar al usuario.
+class _RecenterFab extends StatelessWidget {
+  const _RecenterFab({required this.isFollowing, required this.onTap});
 
+  final bool isFollowing;
   final VoidCallback onTap;
 
   @override
@@ -396,8 +412,8 @@ class _RecenterButton extends StatelessWidget {
           button: true,
           label: 'Centrar el mapa en mi posición',
           child: Material(
-            color: AppColors.surface,
-            shape: const StadiumBorder(
+            color: isFollowing ? AppColors.surface : AppColors.accent,
+            shape: const CircleBorder(
               side: BorderSide(color: AppColors.borderStrong),
             ),
             elevation: 8,
@@ -405,17 +421,13 @@ class _RecenterButton extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               onTap: onTap,
-              child: const Padding(
-                padding: EdgeInsets.symmetric(
-                    horizontal: Spacing.lg, vertical: Spacing.md),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Icon(Icons.my_location_rounded,
-                        size: 18, color: AppColors.accent),
-                    SizedBox(width: Spacing.sm),
-                    Text('Centrar'),
-                  ],
+              child: SizedBox(
+                width: 52,
+                height: 52,
+                child: Icon(
+                  Icons.my_location_rounded,
+                  size: 22,
+                  color: isFollowing ? AppColors.accent : AppColors.canvas,
                 ),
               ),
             ),

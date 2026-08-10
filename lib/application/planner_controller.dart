@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/geo/geo_point.dart';
 import '../domain/models/trip_plan.dart';
 import '../domain/routing/route_engine.dart';
+import '../domain/routing/route_preferences.dart';
 import '../models/route.dart';
 import 'data_providers.dart';
 
@@ -24,6 +25,8 @@ typedef _PlanRequest = ({
   GeoPoint destination,
   List<Route> routes,
   double maxWalkMeters,
+  String routePreference,
+  String? favoriteTransportTypeId,
 });
 
 /// Punto de entrada para `compute()`: el motor corre fuera del hilo de UI
@@ -37,6 +40,10 @@ RoutePlanOutcome _planInIsolate(_PlanRequest request) {
     destination: request.destination,
     routes: request.routes,
     maxWalkMeters: request.maxWalkMeters,
+    preferences: RoutePreferences(
+      routePreference: request.routePreference,
+      favoriteTransportTypeId: request.favoriteTransportTypeId,
+    ),
   );
 }
 
@@ -70,6 +77,8 @@ class PlannerController extends Notifier<PlannerState> {
 
     try {
       final List<Route> routes = await ref.read(routesProvider.future);
+      final RoutePreferences preferences =
+          await ref.read(userPreferencesProvider.future);
 
       if (!overrideMaxWalk) {
         final double maxWalk = await ref.read(maxWalkDistanceProvider.future);
@@ -80,6 +89,8 @@ class PlannerController extends Notifier<PlannerState> {
             destination: destination,
             routes: routes,
             maxWalkMeters: maxWalk,
+            routePreference: preferences.routePreference,
+            favoriteTransportTypeId: preferences.favoriteTransportTypeId,
           ),
         );
         await minVisible;
@@ -104,6 +115,8 @@ class PlannerController extends Notifier<PlannerState> {
           destination: destination,
           routes: routes,
           maxWalkMeters: kOverrideWalkCapMeters,
+          routePreference: preferences.routePreference,
+          favoriteTransportTypeId: preferences.favoriteTransportTypeId,
         ),
       );
       await minVisible;
@@ -120,6 +133,8 @@ class PlannerController extends Notifier<PlannerState> {
             destination: destination,
             routes: routes,
             maxWalkMeters: double.infinity,
+            routePreference: preferences.routePreference,
+            favoriteTransportTypeId: preferences.favoriteTransportTypeId,
           ),
         );
       }

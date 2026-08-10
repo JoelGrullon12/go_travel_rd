@@ -27,7 +27,7 @@ void main() {
     uid: 'uid-1',
     email: 'ana@example.com',
     name: 'Ana',
-    favoriteTransportTypeIds: <String>['metro'],
+    favoriteTransportTypeId: 'metro',
     maxWalkDistance: 1500,
     routePreference: 'speed',
   );
@@ -61,7 +61,7 @@ void main() {
       (WidgetTester tester) async {
     await pumpPhone(tester);
 
-    expect(find.text('Tipos de transporte preferido'), findsOneWidget);
+    expect(find.text('Tipo de transporte preferido'), findsOneWidget);
     expect(find.text('Preferencia de viaje'), findsOneWidget);
     expect(find.text('Distancia máxima a pie (metros)'), findsOneWidget);
 
@@ -123,28 +123,42 @@ void main() {
     expect(find.text('El mínimo es 100 m'), findsOneWidget);
   });
 
-  testWidgets('El multi-select de transporte abre el diálogo y aplica la selección',
+  testWidgets('El radio de transporte permite elegir un solo tipo a la vez',
       (WidgetTester tester) async {
     await pumpPhone(tester);
 
     await tester.tap(find.byKey(const Key('transport-types-field')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Tipos de transporte preferidos'), findsOneWidget);
+    expect(find.text('Tipo de transporte preferido'), findsNWidgets(2));
     final Finder dialog = find.byType(AlertDialog);
 
-    // Metro viene marcado; se desmarca y se marca OMSA.
-    await tester.tap(
-        find.descendant(of: dialog, matching: find.text('Metro')));
+    // Metro viene marcado (precargado); se marca OMSA y queda solo OMSA.
     await tester.tap(
         find.descendant(of: dialog, matching: find.text('OMSA')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Aplicar'));
     await tester.pumpAndSettle();
 
-    // La etiqueta del campo refleja la nueva selección.
+    // La etiqueta del campo refleja la nueva selección (una sola).
     expect(find.text('OMSA'), findsOneWidget);
     expect(find.text('Metro'), findsNothing);
+  });
+
+  testWidgets('El radio permite limpiar la preferencia con "Ninguno"',
+      (WidgetTester tester) async {
+    await pumpPhone(tester);
+
+    await tester.tap(find.byKey(const Key('transport-types-field')));
+    await tester.pumpAndSettle();
+
+    final Finder dialog = find.byType(AlertDialog);
+    await tester.tap(find.descendant(of: dialog, matching: find.text('Ninguno')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Aplicar'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Ninguno'), findsOneWidget);
   });
 
   testWidgets('No hay desbordes de layout en pantalla estrecha (375 pt)',

@@ -85,6 +85,15 @@ class PathResult {
   final double totalMinutes;
 }
 
+/// Costo de recorrer una arista durante el Dijkstra.
+///
+/// `incomingEdge` es la arista por la que se llegó al nodo actual (`null`
+/// cuando el nodo es una fuente, p.ej. el usuario acaba de caminar hasta él):
+/// con eso el motor detecta si esta arista es un **abordaje** (cambió de ruta)
+/// y puede cobrar tarifa o penalizar el modo, o si es una arista más del mismo
+/// trayecto. Sin callback, [StationGraph.dijkstraFrom] usa [GraphEdge.minutes].
+typedef EdgeCost = double Function(GraphEdge? incomingEdge, GraphEdge edge);
+
 /// Resultado de un Dijkstra multi-fuente: la distancia mínima a **cada** nodo
 /// del grafo y la arista por la que se llegó mejor a cada uno.
 ///
@@ -172,7 +181,13 @@ class StationGraph {
   /// (abordaje × bajada). Complejidad O((V+E) log V).
   ///
   /// Si un nodo aparece en varias fuentes, gana la de menor costo inicial.
-  DijkstraResult dijkstraFrom(Iterable<(String, double)> starts) {
+  ///
+  /// [cost] sobreescribe el peso de cada arista (p.ej. costo generalizado con
+  /// tarifa y preferencias de modo). Sin él, el peso es [GraphEdge.minutes].
+  DijkstraResult dijkstraFrom(
+    Iterable<(String, double)> starts, {
+    EdgeCost? cost,
+  }) {
     final Map<String, double> dist = <String, double>{};
     final Map<String, GraphEdge> prevEdge = <String, GraphEdge>{};
     final SplayTreeMap<double, List<String>> queue =
@@ -193,7 +208,9 @@ class StationGraph {
 
         for (final GraphEdge edge
             in _adjacency[nodeId] ?? const <GraphEdge>[]) {
-          final double nd = d + edge.minutes;
+          final double edgeCost =
+              cost?.call(prevEdge[nodeId], edge) ?? edge.minutes;
+          final double nd = d + edgeCost;
           final double? old = dist[edge.toId];
           if (old != null && old <= nd) continue;
           dist[edge.toId] = nd;

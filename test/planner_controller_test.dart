@@ -7,6 +7,7 @@ import 'package:go_travel_rd/application/planner_controller.dart';
 import 'package:go_travel_rd/domain/geo/geo_point.dart';
 import 'package:go_travel_rd/domain/models/trip_plan.dart';
 import 'package:go_travel_rd/domain/routing/route_engine.dart';
+import 'package:go_travel_rd/domain/routing/route_preferences.dart';
 import 'package:go_travel_rd/models/route.dart';
 
 import 'support/test_plans.dart';
@@ -42,6 +43,9 @@ void main() {
         routesProvider.overrideWith((ref) async => routes),
         maxWalkDistanceProvider.overrideWith(
           (ref) async => kDefaultMaxWalkMeters,
+        ),
+        userPreferencesProvider.overrideWith(
+          (ref) async => const RoutePreferences(),
         ),
       ],
     );

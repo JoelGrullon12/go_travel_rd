@@ -5,6 +5,7 @@ import 'package:go_travel_rd/domain/geo/geo_point.dart';
 import 'package:go_travel_rd/domain/models/transport_mode.dart';
 import 'package:go_travel_rd/domain/models/trip_plan.dart';
 import 'package:go_travel_rd/domain/routing/route_engine.dart';
+import 'package:go_travel_rd/domain/routing/route_preferences.dart';
 import 'package:go_travel_rd/models/route.dart';
 
 import 'support/test_plans.dart';
@@ -65,12 +66,42 @@ RoutePlanOutcome _plan(
   GeoPoint destination, {
   List<Route> routes = const <Route>[],
   double maxWalkMeters = 1500,
+  RoutePreferences preferences = const RoutePreferences(),
 }) => const RouteEngine().plan(
   origin: origin,
   destination: destination,
   routes: routes.isEmpty ? _metroNetwork() : routes,
   maxWalkMeters: maxWalkMeters,
+  preferences: preferences,
 );
+
+/// Ruta de prueba con tipo, tarifa y velocidad propios (para los tests de
+/// preferencias, que necesitan dos redes en paralelo comparables).
+Route _lineRoute(
+  String id,
+  String type,
+  double price,
+  double avgMinutesPerKm,
+  List<(GeoPoint, String)> points,
+) => Route(
+      id: id,
+      name: id,
+      transportTypeId: type,
+      province: 'Distrito Nacional',
+      price: price,
+      avgMinutesPerKm: avgMinutesPerKm,
+      active: true,
+      hasFixedStations: true,
+      stations: <RouteStation>[
+        for (int i = 0; i < points.length; i++)
+          RouteStation(
+            stationId: '$id-$i',
+            order: i,
+            name: points[i].$2,
+            location: fs.GeoPoint(points[i].$1.lat, points[i].$1.lng),
+          ),
+      ],
+    );
 
 void main() {
   group('RouteEngine', () {
@@ -122,7 +153,7 @@ void main() {
       expect(outcome.failure, RoutePlanFailure.noStationsNearDestination);
     });
 
-    test('transbordo L1 → L2 con pasillo a pie de 0 m', () {
+    test('transbordo L1 → L2 con pasillo a pie de 0 m: una sola tarifa', () {
       final GeoPoint origin = eastOf(kMetroLine1.first.position, -200);
       final GeoPoint destination = eastOf(kMetroLine2[18].position, 200);
 
@@ -143,7 +174,10 @@ void main() {
       expect(plan.legs[1].stops.last.isTransfer, isTrue);
       expect(plan.legs[3].stops.first.isTransfer, isTrue);
       expect(plan.legs[3].lineColorHex, kLine2Color);
-      expect(plan.totalFareDop, 40);
+      // Transbordo dentro de la misma estación compartida: el pasaje se paga
+      // una sola vez (L1), el tramo de L2 no suma tarifa.
+      expect(plan.legs[3].fareDop, 0);
+      expect(plan.totalFareDop, 20);
     });
 
     test(
@@ -478,6 +512,160 @@ void main() {
           _plan(origin, destination, maxWalkMeters: double.infinity);
       expect(outcome.failure, isNull);
       expect(outcome.plan!.legs[1].stops.first.id, 'l1-01');
+    });
+
+    test('con "price" elige la ruta más barata aunque sea más lenta', () {
+      // Dos redes paralelas e independientes (a 2 km, sin transbordo): Metro
+      // rápido (6 min, RD$ 20) y OMSA lenta (12 min, RD$ 10). El origen/destino
+      // quedan a 1 km de cada extremo, dentro del límite a pie.
+      final GeoPoint a1 = GeoPoint(18.5000, -69.9000);
+      final GeoPoint a2 = eastOf(a1, 6000);
+      final GeoPoint o1 = northOf(a1, 2000);
+      final GeoPoint o2 = northOf(a2, 2000);
+      final GeoPoint origin = northOf(a1, 1000);
+      final GeoPoint destination = northOf(a2, 1000);
+
+      final List<Route> routes = <Route>[
+        _lineRoute('metro-fast', 'metro', 20, 1.0, <(GeoPoint, String)>[
+          (a1, 'M1'),
+          (a2, 'M2'),
+        ]),
+        _lineRoute('omsa-cheap', 'omsa', 10, 2.0, <(GeoPoint, String)>[
+          (o1, 'O1'),
+          (o2, 'O2'),
+        ]),
+      ];
+
+      final RoutePlanOutcome fast = _plan(origin, destination, routes: routes);
+      expect(fast.failure, isNull);
+      expect(fast.plan!.legs[1].lineName, 'metro-fast');
+      expect(fast.plan!.totalFareDop, 20);
+
+      final RoutePlanOutcome cheap = _plan(
+        origin,
+        destination,
+        routes: routes,
+        preferences: const RoutePreferences(routePreference: 'price'),
+      );
+      expect(cheap.failure, isNull);
+      expect(cheap.plan!.legs[1].lineName, 'omsa-cheap');
+      expect(cheap.plan!.totalFareDop, 10);
+    });
+
+    test('con "distance" elige la ruta más corta aunque sea más lenta', () {
+      // Metro directo de 4 km pero lento (12 min) vs OMSA en zigzag de ~7.8 km
+      // pero rápido (7.8 min): por velocidad gana OMSA; por distancia, Metro.
+      final GeoPoint a1 = GeoPoint(18.5000, -69.9000);
+      final GeoPoint a2 = eastOf(a1, 4000);
+      final GeoPoint o1 = northOf(a1, 2000);
+      final GeoPoint o2 = northOf(a2, 2000);
+      final GeoPoint omid = GeoPoint(o1.lat + 0.03, (o1.lng + o2.lng) / 2);
+      final GeoPoint origin = northOf(a1, 1000);
+      final GeoPoint destination = northOf(a2, 1000);
+
+      final List<Route> routes = <Route>[
+        _lineRoute('metro-short', 'metro', 5, 3.0, <(GeoPoint, String)>[
+          (a1, 'M1'),
+          (a2, 'M2'),
+        ]),
+        _lineRoute('omsa-long', 'omsa', 5, 1.0, <(GeoPoint, String)>[
+          (o1, 'O1'),
+          (omid, 'Omid'),
+          (o2, 'O2'),
+        ]),
+      ];
+
+      final RoutePlanOutcome fast = _plan(origin, destination, routes: routes);
+      expect(fast.failure, isNull);
+      expect(fast.plan!.legs[1].lineName, 'omsa-long');
+
+      final RoutePlanOutcome short = _plan(
+        origin,
+        destination,
+        routes: routes,
+        preferences: const RoutePreferences(routePreference: 'distance'),
+      );
+      expect(short.failure, isNull);
+      expect(short.plan!.legs[1].lineName, 'metro-short');
+      expect(short.plan!.legs[1].distanceMeters, lessThan(5000));
+    });
+
+    test('el tipo de transporte favorito gana aunque sea más lento', () {
+      // Misma geometría que el test de precio: Metro rápido (6 min) vs OMSA
+      // lenta (12 min). Con favorito OMSA, el Metro paga la penalización de
+      // modo al abordar y OMSA gana pese a ser más lenta.
+      final GeoPoint a1 = GeoPoint(18.5000, -69.9000);
+      final GeoPoint a2 = eastOf(a1, 6000);
+      final GeoPoint o1 = northOf(a1, 2000);
+      final GeoPoint o2 = northOf(a2, 2000);
+      final GeoPoint origin = northOf(a1, 1000);
+      final GeoPoint destination = northOf(a2, 1000);
+
+      final List<Route> routes = <Route>[
+        _lineRoute('metro-fast', 'metro', 20, 1.0, <(GeoPoint, String)>[
+          (a1, 'M1'),
+          (a2, 'M2'),
+        ]),
+        _lineRoute('omsa-slow', 'omsa', 10, 2.0, <(GeoPoint, String)>[
+          (o1, 'O1'),
+          (o2, 'O2'),
+        ]),
+      ];
+
+      final RoutePlanOutcome noPref = _plan(origin, destination, routes: routes);
+      expect(noPref.plan!.legs[1].lineName, 'metro-fast');
+
+      final RoutePlanOutcome prefOmsa = _plan(
+        origin,
+        destination,
+        routes: routes,
+        preferences: const RoutePreferences(favoriteTransportTypeId: 'omsa'),
+      );
+      expect(prefOmsa.failure, isNull);
+      expect(prefOmsa.plan!.legs[1].lineName, 'omsa-slow');
+    });
+
+    test('el teleférico participa en los planes y respeta la preferencia', () {
+      // Teleférico rápido (6 min, RD$ 30) vs Metro lento (12 min, RD$ 15).
+      // Por velocidad gana el teleférico; con favorito Metro, el teleférico
+      // paga la penalización y gana el Metro.
+      final GeoPoint a1 = GeoPoint(18.5000, -69.9000);
+      final GeoPoint a2 = eastOf(a1, 6000);
+      final GeoPoint t1 = northOf(a1, 2000);
+      final GeoPoint t2 = northOf(a2, 2000);
+      final GeoPoint origin = northOf(a1, 1000);
+      final GeoPoint destination = northOf(a2, 1000);
+
+      final List<Route> routes = <Route>[
+        _lineRoute('teleferico-fast', 'teleferico', 30, 1.0,
+            <(GeoPoint, String)>[(t1, 'T1'), (t2, 'T2')]),
+        _lineRoute('metro-slow', 'metro', 15, 2.0, <(GeoPoint, String)>[
+          (a1, 'M1'),
+          (a2, 'M2'),
+        ]),
+      ];
+
+      final RoutePlanOutcome noPref = _plan(origin, destination, routes: routes);
+      expect(noPref.failure, isNull);
+      expect(noPref.plan!.legs[1].mode, TransportMode.teleferico);
+
+      final RoutePlanOutcome prefMetro = _plan(
+        origin,
+        destination,
+        routes: routes,
+        preferences: const RoutePreferences(favoriteTransportTypeId: 'metro'),
+      );
+      expect(prefMetro.failure, isNull);
+      expect(prefMetro.plan!.legs[1].mode, TransportMode.metro);
+
+      final RoutePlanOutcome prefTeleferico = _plan(
+        origin,
+        destination,
+        routes: routes,
+        preferences: const RoutePreferences(favoriteTransportTypeId: 'teleferico'),
+      );
+      expect(prefTeleferico.failure, isNull);
+      expect(prefTeleferico.plan!.legs[1].mode, TransportMode.teleferico);
     });
   });
 }

@@ -12,7 +12,8 @@ import '../services/auth_service.dart';
 /// Pantalla de edición de preferencias del usuario (Hito 5).
 ///
 /// Se abre desde [ProfileScreen] con el [AppUser] actual y permite editar:
-/// · tipos de transporte preferidos (multi-select, desde `transportTypes`);
+/// · tipo de transporte preferido (radio, un solo tipo, desde
+///   `transportTypes`; "Ninguno" lo limpia);
 /// · preferencia de viaje (`routePreference`): más rápido / más barato /
 ///   más corto;
 /// · distancia máxima a pie (input numérico, 100–5000 m).
@@ -41,14 +42,14 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final _maxWalkController = TextEditingController();
 
-  late Set<String> _selectedTransportTypeIds;
+  String? _selectedTransportTypeId;
   late String _routePreference;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _selectedTransportTypeIds = {...widget.user.favoriteTransportTypeIds};
+    _selectedTransportTypeId = widget.user.favoriteTransportTypeId;
     _routePreference =
         AppUser.normalizeRoutePreference(widget.user.routePreference);
     _maxWalkController.text = widget.user.maxWalkDistance.toInt().toString();
@@ -60,17 +61,18 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     super.dispose();
   }
 
-  /// Nombre legible de los tipos seleccionados: el `name` de `transportTypes`
+  /// Nombre legible del tipo seleccionado: el `name` de `transportTypes`
   /// cuando se conoce, o el id crudo si la colección aún no cargó.
   String _transportLabel(List<TransportType> types) {
-    if (_selectedTransportTypeIds.isEmpty) return 'Ninguno';
-    final Map<String, String> byId = <String, String>{
-      for (final TransportType t in types) t.id: t.name,
-    };
-    return _selectedTransportTypeIds.map((String id) => byId[id] ?? id).join(', ');
+    final String? selected = _selectedTransportTypeId;
+    if (selected == null) return 'Ninguno';
+    for (final TransportType t in types) {
+      if (t.id == selected) return t.name;
+    }
+    return selected;
   }
 
-  /// Abre el multi-select de tipos de transporte (checkbox por tipo).
+  /// Abre el selector de tipo de transporte (radio: un solo tipo a la vez).
   Future<void> _pickTransportTypes() async {
     final List<TransportType> types =
         ref.read(transportTypesProvider).valueOrNull ?? const <TransportType>[];
@@ -83,14 +85,14 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       return;
     }
 
-    final Set<String> result = Set<String>.from(_selectedTransportTypeIds);
+    String? result = _selectedTransportTypeId;
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => StatefulBuilder(
         builder: (BuildContext context, StateSetter setDialogState) =>
             AlertDialog(
           backgroundColor: AppColors.surface,
-          title: const Text('Tipos de transporte preferidos'),
+          title: const Text('Tipo de transporte preferido'),
           content: SizedBox(
             width: double.maxFinite,
             child: ConstrainedBox(
@@ -98,19 +100,27 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
               child: ListView(
                 shrinkWrap: true,
                 children: <Widget>[
-                  for (final TransportType type in types)
-                    CheckboxListTile(
-                      value: result.contains(type.id),
-                      onChanged: (bool? checked) => setDialogState(() {
-                        if (checked ?? false) {
-                          result.add(type.id);
-                        } else {
-                          result.remove(type.id);
-                        }
-                      }),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: Text(type.name),
+                  RadioGroup<String>(
+                    groupValue: result,
+                    onChanged: (String? value) => setDialogState(() {
+                      result = value == null || value.isEmpty ? null : value;
+                    }),
+                    child: Column(
+                      children: <Widget>[
+                        const RadioListTile<String>(
+                          value: '',
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: Text('Ninguno'),
+                        ),
+                        for (final TransportType type in types)
+                          RadioListTile<String>(
+                            value: type.id,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            title: Text(type.name),
+                          ),
+                      ],
                     ),
+                  ),
                 ],
               ),
             ),
@@ -129,7 +139,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       ),
     );
     if (ok == true && mounted) {
-      setState(() => _selectedTransportTypeIds = result);
+      setState(() => _selectedTransportTypeId = result);
     }
   }
 
@@ -155,11 +165,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             );
     try {
       await AuthService().updateUserData(widget.user.uid, <String, dynamic>{
-        'favoriteTransportTypeIds': _selectedTransportTypeIds.toList(),
+        'favoriteTransportTypeId': _selectedTransportTypeId,
         'routePreference': _routePreference,
         'maxWalkDistance': maxWalk,
       });
       ref.invalidate(maxWalkDistanceProvider);
+      ref.invalidate(userPreferencesProvider);
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (_) {
@@ -203,8 +214,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     onTap: _saving ? null : _pickTransportTypes,
                     child: InputDecorator(
                       decoration: const InputDecoration(
-                        labelText: 'Tipos de transporte preferido',
-                        helperText: 'Selecciona los que usas normalmente',
+                        labelText: 'Tipo de transporte preferido',
+                        helperText: 'Elige uno: el motor lo favorece en la ruta',
                         border: OutlineInputBorder(),
                         suffixIcon: Icon(Icons.arrow_drop_down),
                       ),

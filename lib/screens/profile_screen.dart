@@ -3,7 +3,7 @@ import '../core/theme/app_colors.dart';
 import '../models/user.dart';
 import '../services/auth_service.dart';
 import 'edit_profile_screen.dart';
-import 'login_screen.dart';
+import 'main_shell.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -16,6 +16,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _authService = AuthService();
   AppUser? _user;
   bool _loading = true;
+  bool _signingOut = false;
 
   @override
   void initState() {
@@ -44,6 +45,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
     if (saved == true && mounted) _loadUser();
+  }
+
+  /// Cierra la sesión: muestra carga mientras tanto y, al terminar, vuelve a la
+  /// pantalla principal. El navigator se captura antes del `await` porque al
+  /// cambiar el estado de auth el shell reconstruye y desmonta este widget.
+  Future<void> _signOut() async {
+    if (_signingOut) return;
+    final NavigatorState navigator = Navigator.of(context);
+    setState(() => _signingOut = true);
+    try {
+      await _authService.signOut();
+      navigator.pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => const MainShellScreen()),
+        (_) => false,
+      );
+    } finally {
+      if (mounted) setState(() => _signingOut = false);
+    }
   }
 
   @override
@@ -87,10 +106,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       const SizedBox(height: 32),
                       _infoTile(
-                          'Transportes preferidos',
-                          _user!.favoriteTransportTypeIds.isEmpty
-                              ? 'No especificado'
-                              : _user!.favoriteTransportTypeIds.join(', ')),
+                          'Transporte preferido',
+                          _user!.favoriteTransportTypeId ?? 'No especificado'),
                       _infoTile('Distancia máxima a pie',
                           '${_user!.maxWalkDistance.toInt()} m'),
                       _infoTile('Preferencia de ruta', _preferenceLabel),
@@ -108,17 +125,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         width: double.infinity,
                         height: 48,
                         child: OutlinedButton(
-                          onPressed: () async {
-                            await _authService.signOut();
-                            if (!context.mounted) return;
-                            Navigator.pushAndRemoveUntil(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const LoginScreen()),
-                              (_) => false,
-                            );
-                          },
-                          child: const Text('Cerrar Sesión'),
+                          onPressed: _signingOut ? null : _signOut,
+                          child: _signingOut
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Cerrar Sesión'),
                         ),
                       ),
                     ],

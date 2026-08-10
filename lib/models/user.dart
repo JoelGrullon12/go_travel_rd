@@ -21,7 +21,10 @@ class AppUser {
   final String uid;
   final String email;
   final String name;
-  final List<String> favoriteTransportTypeIds;
+
+  /// Tipo de transporte preferido del usuario (id de `transportTypes`), o
+  /// `null` cuando no tiene ninguno marcado (se elige uno solo, radio en la UI).
+  final String? favoriteTransportTypeId;
   final double maxWalkDistance;
   final String routePreference;
   final String? photoUrl;
@@ -35,7 +38,7 @@ class AppUser {
     required this.uid,
     required this.email,
     required this.name,
-    this.favoriteTransportTypeIds = const [],
+    this.favoriteTransportTypeId,
     this.maxWalkDistance = 1500.0,
     this.routePreference = 'speed',
     this.photoUrl,
@@ -47,7 +50,7 @@ class AppUser {
         'uid': uid,
         'email': email,
         'name': name,
-        'favoriteTransportTypeIds': favoriteTransportTypeIds,
+        'favoriteTransportTypeId': favoriteTransportTypeId,
         'maxWalkDistance': maxWalkDistance,
         'routePreference': routePreference,
         'photoUrl': photoUrl,
@@ -59,8 +62,9 @@ class AppUser {
         uid: uid,
         email: map['email'] as String? ?? '',
         name: map['name'] as String? ?? '',
-        favoriteTransportTypeIds:
-            List<String>.from(map['favoriteTransportTypeIds'] as List? ?? []),
+        // Campo único nuevo. Fallback para docs legados que guardaban
+        // `favoriteTransportTypeIds` (lista): se toma el primer elemento.
+        favoriteTransportTypeId: _legacyFavoriteTransportType(map),
         maxWalkDistance: (map['maxWalkDistance'] as num?)?.toDouble() ?? 1500.0,
         routePreference: normalizeRoutePreference(map['routePreference'] as String?),
         photoUrl: map['photoUrl'] as String?,
@@ -74,11 +78,23 @@ class AppUser {
             .toList(),
       );
 
+  /// Lee `favoriteTransportTypeId` (campo único) y cae al primer elemento de
+  /// `favoriteTransportTypeIds` (lista) para los usuarios guardados antes de la
+  /// migración. `null` cuando no hay preferencia.
+  static String? _legacyFavoriteTransportType(Map<String, dynamic> map) {
+    final String? single = map['favoriteTransportTypeId'] as String?;
+    if (single != null && single.isNotEmpty) return single;
+    final List<dynamic>? legacy = map['favoriteTransportTypeIds'] as List?;
+    if (legacy == null || legacy.isEmpty) return null;
+    final Object? first = legacy.first;
+    return first is String && first.isNotEmpty ? first : null;
+  }
+
   AppUser copyWith({
     String? uid,
     String? email,
     String? name,
-    List<String>? favoriteTransportTypeIds,
+    String? favoriteTransportTypeId,
     double? maxWalkDistance,
     String? routePreference,
     String? photoUrl,
@@ -89,8 +105,8 @@ class AppUser {
         uid: uid ?? this.uid,
         email: email ?? this.email,
         name: name ?? this.name,
-        favoriteTransportTypeIds:
-            favoriteTransportTypeIds ?? this.favoriteTransportTypeIds,
+        favoriteTransportTypeId:
+            favoriteTransportTypeId ?? this.favoriteTransportTypeId,
         maxWalkDistance: maxWalkDistance ?? this.maxWalkDistance,
         routePreference: routePreference ?? this.routePreference,
         photoUrl: photoUrl ?? this.photoUrl,

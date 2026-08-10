@@ -30,8 +30,14 @@ RouteMatch matchAt(
 /// A la latitud 18.48°, un grado de longitud mide ~105 580 m.
 const double kMetersPerLngDegree = 105580;
 
+/// Un grado de latitud mide ~111 320 m (constante, buena aproximación local).
+const double kMetersPerLatDegree = 111320;
+
 GeoPoint eastOf(GeoPoint origin, double meters) =>
     GeoPoint(origin.lat, origin.lng + meters / kMetersPerLngDegree);
+
+GeoPoint northOf(GeoPoint origin, double meters) =>
+    GeoPoint(origin.lat + meters / kMetersPerLatDegree, origin.lng);
 
 /// Plan recto de 3 tramos: caminar 200 m → metro 1489 m (4 paradas) →
 /// caminar 200 m. Total ≈ 1889 m.

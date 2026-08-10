@@ -49,4 +49,44 @@ void main() {
       expect(user.routePreference, 'price');
     });
   });
+
+  group('AppUser.favoriteTransportTypeId', () {
+    test('lee el campo único', () {
+      final AppUser user = AppUser.fromMap(
+        <String, dynamic>{'favoriteTransportTypeId': 'teleferico'},
+        'u4',
+      );
+
+      expect(user.favoriteTransportTypeId, 'teleferico');
+    });
+
+    test('sin preferencia → null', () {
+      final AppUser user = AppUser.fromMap(const <String, dynamic>{}, 'u5');
+
+      expect(user.favoriteTransportTypeId, isNull);
+    });
+
+    test('fallback legado: lista favoriteTransportTypeIds → primer elemento', () {
+      final AppUser user = AppUser.fromMap(
+        <String, dynamic>{
+          'favoriteTransportTypeIds': <String>['omsa', 'metro'],
+        },
+        'u6',
+      );
+
+      expect(user.favoriteTransportTypeId, 'omsa');
+    });
+
+    test('el campo único gana sobre el fallback legado', () {
+      final AppUser user = AppUser.fromMap(
+        <String, dynamic>{
+          'favoriteTransportTypeId': 'metro',
+          'favoriteTransportTypeIds': <String>['omsa'],
+        },
+        'u7',
+      );
+
+      expect(user.favoriteTransportTypeId, 'metro');
+    });
+  });
 }
