@@ -2,6 +2,22 @@ import 'trip_history_entry.dart';
 import 'user_route.dart';
 
 class AppUser {
+  /// Valores válidos de `routePreference` (ver `lib/models/models.yaml`).
+  static const List<String> routePreferenceValues = <String>[
+    'speed',
+    'price',
+    'distance',
+  ];
+
+  /// Normaliza una preferencia de ruta leída de la BD: si no es uno de los
+  /// valores conocidos ([routePreferenceValues]) —p.ej. legados como
+  /// `'rapidez'`— devuelve el default `'speed'`. Así ningún valor ajeno llega
+  /// al resto de la app (la UI nunca debe recibir una preferencia desconocida).
+  static String normalizeRoutePreference(String? value) {
+    if (routePreferenceValues.contains(value)) return value!;
+    return 'speed';
+  }
+
   final String uid;
   final String email;
   final String name;
@@ -46,7 +62,7 @@ class AppUser {
         favoriteTransportTypeIds:
             List<String>.from(map['favoriteTransportTypeIds'] as List? ?? []),
         maxWalkDistance: (map['maxWalkDistance'] as num?)?.toDouble() ?? 1500.0,
-        routePreference: map['routePreference'] as String? ?? 'speed',
+        routePreference: normalizeRoutePreference(map['routePreference'] as String?),
         photoUrl: map['photoUrl'] as String?,
         userRoutes: (map['userRoutes'] as List? ?? [])
             .whereType<Map>()

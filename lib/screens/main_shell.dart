@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../application/data_providers.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_theme.dart';
 import '../services/auth_service.dart';
@@ -39,7 +40,16 @@ class _MainShellScreenState extends ConsumerState<MainShellScreen> {
     super.initState();
     _user = _authService.currentUser;
     _authService.authStateChanges.listen((user) {
-      if (mounted) setState(() => _user = user);
+      if (mounted) {
+        setState(() => _user = user);
+        // Los `FutureProvider` dependientes del usuario cachean su resultado y
+        // no se enteran de que cambió la sesión: sin esta invalidación, las
+        // rutas/historial/preferencias de un usuario recién logueado no se
+        // cargan hasta reiniciar la app (que recrea el container).
+        ref.invalidate(userRoutesProvider);
+        ref.invalidate(tripHistoryProvider);
+        ref.invalidate(maxWalkDistanceProvider);
+      }
     });
   }
 

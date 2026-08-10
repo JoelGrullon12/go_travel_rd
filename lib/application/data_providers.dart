@@ -2,11 +2,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/route.dart';
+import '../models/transport_type.dart';
 import '../models/trip_history_entry.dart';
 import '../models/user.dart';
 import '../models/user_route.dart';
 import '../services/auth_service.dart';
 import '../services/route_service.dart';
+import '../services/transport_type_service.dart';
 import '../services/trip_history_service.dart';
 import '../services/user_route_service.dart';
 
@@ -51,4 +53,11 @@ final FutureProvider<List<UserRoute>> userRoutesProvider =
 final FutureProvider<List<TripHistoryEntry>> tripHistoryProvider =
     FutureProvider<List<TripHistoryEntry>>(
   (ref) => TripHistoryService().getTripHistory(),
+);
+
+/// Catálogo de tipos de transporte (`transportTypes`) para la UI de
+/// preferencias. Vacío si la colección no tiene documentos.
+final FutureProvider<List<TransportType>> transportTypesProvider =
+    FutureProvider<List<TransportType>>(
+  (ref) => TransportTypeService().getTransportTypes(),
 );

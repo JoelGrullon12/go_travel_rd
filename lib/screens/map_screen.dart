@@ -1039,19 +1039,21 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           'estación o parada más cercana, superando tu distancia máxima '
           'configurada. ¿Quieres planificar la ruta de todas formas?',
         ),
-        // Un solo `Row` dentro de `actions`: el `OverflowBar` de M3 apila en
-        // vertical los botones que no caben (ancho por defecto del diálogo),
-        // por eso se fuerzan lado a lado.
+        // Un `Wrap` en vez de un `Row`: con el `Row` los dos botones sumados
+        // excedían el ancho del diálogo por fracciones de píxel y Flutter
+        // pintaba el overflow amarillo/negro. El `Wrap` deja que el segundo
+        // botón baje a otra línea cuando no cabe en vez de desbordarse.
         actions: <Widget>[
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
             children: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
                 child: const Text('Cancelar ruta'),
               ),
-              const SizedBox(width: 8),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(true),
                 child: const Text('Planificar ruta'),

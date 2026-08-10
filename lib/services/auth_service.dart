@@ -93,4 +93,14 @@ class AuthService {
   }
 
   Future<AppUser?> getUserData(String uid) => _getUserData(uid);
+
+  /// Actualiza solo los campos indicados del usuario (sin tocar el resto del
+  /// documento, p.ej. `userRoutes`/`tripHistory`). Usado por la pantalla de
+  /// preferencias (Hito 5).
+  Future<void> updateUserData(
+    String uid,
+    Map<String, dynamic> fields,
+  ) async {
+    await _firestore.collection('users').doc(uid).update(fields);
+  }
 }

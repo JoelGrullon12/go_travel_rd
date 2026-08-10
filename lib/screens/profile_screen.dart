@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../core/theme/app_colors.dart';
 import '../models/user.dart';
 import '../services/auth_service.dart';
+import 'edit_profile_screen.dart';
 import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -32,6 +33,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _loading = false;
       });
     }
+  }
+
+  /// Abre la pantalla de preferencias y, si el usuario guardó cambios,
+  /// recarga el perfil para reflejar los valores nuevos.
+  Future<void> _openEditProfile() async {
+    final bool? saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => EditProfileScreen(user: _user!),
+      ),
+    );
+    if (saved == true && mounted) _loadUser();
   }
 
   @override
@@ -87,7 +99,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         width: double.infinity,
                         height: 48,
                         child: FilledButton(
-                          onPressed: () {},
+                          onPressed: _openEditProfile,
                           child: const Text('Editar Perfil'),
                         ),
                       ),
@@ -139,13 +151,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String get _preferenceLabel {
     switch (_user!.routePreference) {
       case 'price':
-        return 'Menor precio';
+        return 'Más barato';
       case 'distance':
-        return 'Menor distancia';
+        return 'Más corto';
       case 'speed':
-        return 'Más rápida';
+        return 'Más rápido';
       default:
-        return 'Más rápida';
+        return 'Más rápido';
     }
   }
 }
