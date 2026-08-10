@@ -1,3 +1,4 @@
+import 'trip_history_entry.dart';
 import 'user_route.dart';
 
 class AppUser {
@@ -10,6 +11,10 @@ class AppUser {
   final String? photoUrl;
   final List<UserRoute> userRoutes;
 
+  /// Viajes iniciados por el usuario, en orden cronológico (nuevo primero).
+  /// Se guarda en `users/{uid}.tripHistory` (array de maps).
+  final List<TripHistoryEntry> tripHistory;
+
   const AppUser({
     required this.uid,
     required this.email,
@@ -19,6 +24,7 @@ class AppUser {
     this.routePreference = 'speed',
     this.photoUrl,
     this.userRoutes = const [],
+    this.tripHistory = const [],
   });
 
   Map<String, dynamic> toMap() => {
@@ -30,6 +36,7 @@ class AppUser {
         'routePreference': routePreference,
         'photoUrl': photoUrl,
         'userRoutes': userRoutes.map((r) => r.toMap()).toList(),
+        'tripHistory': tripHistory.map((e) => e.toMap()).toList(),
       };
 
   factory AppUser.fromMap(Map<String, dynamic> map, String uid) => AppUser(
@@ -45,6 +52,10 @@ class AppUser {
             .whereType<Map>()
             .map((e) => UserRoute.fromMap(e.cast<String, dynamic>(), ''))
             .toList(),
+        tripHistory: (map['tripHistory'] as List? ?? [])
+            .whereType<Map>()
+            .map((e) => TripHistoryEntry.fromMap(e.cast<String, dynamic>(), ''))
+            .toList(),
       );
 
   AppUser copyWith({
@@ -56,6 +67,7 @@ class AppUser {
     String? routePreference,
     String? photoUrl,
     List<UserRoute>? userRoutes,
+    List<TripHistoryEntry>? tripHistory,
   }) =>
       AppUser(
         uid: uid ?? this.uid,
@@ -67,5 +79,6 @@ class AppUser {
         routePreference: routePreference ?? this.routePreference,
         photoUrl: photoUrl ?? this.photoUrl,
         userRoutes: userRoutes ?? this.userRoutes,
+        tripHistory: tripHistory ?? this.tripHistory,
       );
 }

@@ -6,9 +6,13 @@ import 'package:intl/intl.dart';
 /// no puede decir "487 m"; decir "500 m" es más honesto y más rápido de leer.
 abstract final class Fmt {
   static final DateFormat _hour = DateFormat('h:mm a', 'es');
+  static final DateFormat _dayMonth = DateFormat('d MMM', 'es');
 
   /// "3:42 p. m."
   static String clock(DateTime time) => _hour.format(time).toLowerCase();
+
+  /// "10 ago" — día + mes abreviado en es-DO, para listas e historial.
+  static String dateDayMonth(DateTime date) => _dayMonth.format(date);
 
   /// "18 min", "1 h 05 min", "ahora".
   static String duration(Duration d) {

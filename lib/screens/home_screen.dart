@@ -12,7 +12,6 @@ import 'package:go_travel_rd/widgets/search_box.dart';
 
 import 'login_screen.dart';
 import 'map_screen.dart';
-import 'profile_screen.dart';
 
 /// Pantalla de entrada de la app (estilo Uber × Google Maps).
 ///
@@ -175,14 +174,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  void _openProfile() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _user != null ? const ProfileScreen() : const LoginScreen(),
-      ),
-    );
-  }
-
   void _openRegister() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
@@ -225,7 +216,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                _buildProfileAvatar(),
               ],
             ),
             const SizedBox(height: Spacing.xxl),
@@ -307,36 +297,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
               ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProfileAvatar() {
-    return Material(
-      color: AppColors.surfaceHigh,
-      shape: const CircleBorder(
-        side: BorderSide(color: AppColors.borderStrong),
-      ),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: _openProfile,
-        child: Padding(
-          padding: const EdgeInsets.all(2),
-          child: CircleAvatar(
-            radius: 16,
-            backgroundColor: AppColors.accentDim,
-            backgroundImage: _user?.photoURL != null
-                ? NetworkImage(_user!.photoURL!)
-                : null,
-            child: _user?.photoURL == null
-                ? Icon(
-                    _user != null ? Icons.person : Icons.person_outline,
-                    size: 20,
-                    color: AppColors.textPrimary,
-                  )
-                : null,
-          ),
         ),
       ),
     );

@@ -28,9 +28,16 @@ User  # collection: users, doc id = Firebase Auth uid
 - maxWalkDistance: float
 - routePreference: string          // "price" | "speed" | "distance"
 - userRoutes: array<map>           // array of userRoutes
+- tripHistory: array<map>          // viajes iniciados (Hito 5), nuevo primero
 
 # users/{uid}/userRoutes/{id}
 - name: string                     // "Home-Work", "Trip to the countryside"
 - startLocation: geopoint
 - finishLocation: geopoint
 - preferredTransportTypeId: string
+
+# users/{uid}.tripHistory  (embebido, no subcolección)
+- startName: string                // nombre geocodificado del origen
+- finishName: string               // nombre geocodificado del destino
+- date: timestamp                  // fecha en que se inició el viaje
+- cost: decimal                    // costo total del viaje (RD$)

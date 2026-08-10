@@ -2,10 +2,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/route.dart';
+import '../models/trip_history_entry.dart';
 import '../models/user.dart';
 import '../models/user_route.dart';
 import '../services/auth_service.dart';
 import '../services/route_service.dart';
+import '../services/trip_history_service.dart';
 import '../services/user_route_service.dart';
 
 /// Distancia máxima a pie por defecto (1500 m ≈ 18 min caminando) cuando el
@@ -42,4 +44,11 @@ final FutureProvider<double> maxWalkDistanceProvider =
 final FutureProvider<List<UserRoute>> userRoutesProvider =
     FutureProvider<List<UserRoute>>(
   (ref) => UserRouteService().getUserRoutes(),
+);
+
+/// Historial de viajes del usuario actual (Hito 5). Vacío sin sesión o sin
+/// viajes iniciados.
+final FutureProvider<List<TripHistoryEntry>> tripHistoryProvider =
+    FutureProvider<List<TripHistoryEntry>>(
+  (ref) => TripHistoryService().getTripHistory(),
 );

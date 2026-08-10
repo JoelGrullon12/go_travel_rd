@@ -7,7 +7,7 @@ import 'package:go_travel_rd/firebase_options.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 import 'core/theme/app_theme.dart';
-import 'screens/home_screen.dart';
+import 'screens/main_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -65,6 +65,6 @@ class GoTravelApp extends StatelessWidget {
             child: child ?? const SizedBox.shrink(),
           );
         },
-        home: const HomeScreen(),
+        home: const MainShellScreen(),
       );
 }

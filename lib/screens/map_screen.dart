@@ -17,15 +17,16 @@ import '../features/live_trip/widgets/map_style.dart';
 import '../features/shared/mode_visuals.dart';
 import '../features/shared/station_visuals.dart';
 import '../models/station.dart';
+import '../models/trip_history_entry.dart';
 import '../models/user_route.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/geocoding_service.dart';
 import '../services/station_service.dart';
+import '../services/trip_history_service.dart';
 import '../services/user_route_service.dart';
 import '../widgets/search_box.dart';
 import 'login_screen.dart';
-import 'profile_screen.dart';
 
 import '../core/theme/app_colors.dart';
 import '../core/utils/formatters.dart';
@@ -688,9 +689,31 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   void _startTrip() {
     final plan = _activePlan;
     if (plan == null) return;
+    _saveTripToHistory(plan);
     Navigator.push(
       context,
       MaterialPageRoute<void>(builder: (_) => LiveTripScreen(planId: plan.id)),
+    );
+  }
+
+  /// Guarda el viaje en el historial del usuario (Hito 5). Solo se registra al
+  /// **iniciar** el viaje, no al calcularlo: si no se comienza, no va a la
+  /// lista. Sin sesión no hay dónde guardarlo y se omite silenciosamente; los
+  /// errores no bloquean el viaje.
+  void _saveTripToHistory(TripPlan plan) {
+    if (_user == null) return;
+    final TripHistoryEntry entry = TripHistoryEntry(
+      id: 'trip-${DateTime.now().millisecondsSinceEpoch}',
+      startName: plan.originName,
+      finishName: plan.destinationName,
+      date: DateTime.now(),
+      cost: plan.totalFareDop,
+    );
+    unawaited(
+      TripHistoryService()
+          .addEntry(entry)
+          .then((_) => ref.invalidate(tripHistoryProvider))
+          .catchError((Object _) {}),
     );
   }
 
@@ -1134,16 +1157,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
   }
 
-  void _openProfile() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) =>
-            _user != null ? const ProfileScreen() : const LoginScreen(),
-      ),
-    );
-  }
-
   // ---------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------
@@ -1242,23 +1255,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: SearchBox(
-                        originController: _originController,
-                        destinationController: _destinationController,
-                        readOnly: true,
-                        onOriginSubmitted: _onOriginSubmitted,
-                        onDestinationSubmitted: _onDestinationSubmitted,
-                        onOriginTap: _startOriginPick,
-                        onDestinationTap: _startDestinationPick,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _buildProfileAvatar(),
-                  ],
+                child: SearchBox(
+                  originController: _originController,
+                  destinationController: _destinationController,
+                  readOnly: true,
+                  onOriginSubmitted: _onOriginSubmitted,
+                  onDestinationSubmitted: _onDestinationSubmitted,
+                  onOriginTap: _startOriginPick,
+                  onDestinationTap: _startDestinationPick,
                 ),
               ),
             ),
@@ -1410,35 +1414,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       position: position,
       icon: BitmapDescriptor.defaultMarkerWithHue(hue),
       infoWindow: InfoWindow(title: title),
-    );
-  }
-
-  Widget _buildProfileAvatar() {
-    return Material(
-      color: Colors.white,
-      shape: const CircleBorder(),
-      elevation: 2,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: _openProfile,
-        child: Padding(
-          padding: const EdgeInsets.all(2),
-          child: CircleAvatar(
-            radius: 16,
-            backgroundColor: Colors.green[700],
-            backgroundImage: _user?.photoURL != null
-                ? NetworkImage(_user!.photoURL!)
-                : null,
-            child: _user?.photoURL == null
-                ? Icon(
-                    _user != null ? Icons.person : Icons.person_outline,
-                    size: 20,
-                    color: Colors.white,
-                  )
-                : null,
-          ),
-        ),
-      ),
     );
   }
 }
