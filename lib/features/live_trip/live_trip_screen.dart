@@ -194,7 +194,11 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen> {
                       },
                       onSkipToEnd: () => controller.seekToFraction(0.985),
                     )
-                  : null,
+                  : _DemoModeButton(
+                      onPressed: () => controller.start(
+                        mode: LocationMode.simulated,
+                      ),
+                    ),
             ),
           ),
 
@@ -287,6 +291,61 @@ class _SimulatedBadge extends StatelessWidget {
               ?.copyWith(color: AppColors.warning),
         ),
       );
+}
+
+/// Botón para pasar el viaje activo al modo demo (posición simulada).
+///
+/// Vive en el mismo sitio donde antes siempre aparecían los controles de la
+/// simulación: en el viaje con GPS real es un solo botón, y al pulsarlo se
+/// activa el simulador con todos sus controles y el badge SIMULADO.
+class _DemoModeButton extends StatelessWidget {
+  const _DemoModeButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextTheme text = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.all(Spacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceHigh,
+        borderRadius: Radii.cardMd,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.science_outlined,
+                  size: 16, color: AppColors.textTertiary),
+              const SizedBox(width: Spacing.sm),
+              Expanded(
+                child: Text(
+                  'MODO DEMO',
+                  style:
+                      text.labelSmall?.copyWith(color: AppColors.textTertiary),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Spacing.md),
+          Text(
+            '¿Sin señal o en un simulador? Activa el modo demo para recorrer '
+            'la ruta con una posición simulada.',
+            style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: Spacing.md),
+          OutlinedButton.icon(
+            onPressed: onPressed,
+            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+            label: const Text('Hacer viaje en modo demo'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _GlassIconButton extends StatelessWidget {

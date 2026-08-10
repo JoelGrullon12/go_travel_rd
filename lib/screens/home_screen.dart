@@ -447,6 +447,8 @@ class _UserRouteCard extends StatelessWidget {
     final TextTheme text = Theme.of(context).textTheme;
     final GeoPoint start = route.startLocation;
     final GeoPoint finish = route.finishLocation;
+    final String startLabel = _labelFor(route.startName, start);
+    final String finishLabel = _labelFor(route.finishName, finish);
 
     return GestureDetector(
       onTap: onTap,
@@ -518,7 +520,7 @@ class _UserRouteCard extends StatelessWidget {
             ),
             const SizedBox(height: Spacing.sm),
             Text(
-              _coordLabel(start),
+              startLabel,
               style: text.bodyMedium?.copyWith(color: AppColors.textSecondary),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -530,7 +532,7 @@ class _UserRouteCard extends StatelessWidget {
                 const SizedBox(width: Spacing.sm),
                 Expanded(
                   child: Text(
-                    _coordLabel(finish),
+                    finishLabel,
                     style: text.bodyMedium?.copyWith(
                       color: AppColors.textSecondary,
                     ),
@@ -546,6 +548,11 @@ class _UserRouteCard extends StatelessWidget {
     );
   }
 
-  static String _coordLabel(GeoPoint p) =>
-      '${p.latitude.toStringAsFixed(5)}, ${p.longitude.toStringAsFixed(5)}';
+  /// Nombre geocodificado del extremo si la ruta lo guardó; si no (rutas
+  /// antiguas), las coordenadas.
+  static String _labelFor(String name, GeoPoint point) {
+    if (name.trim().isNotEmpty) return name;
+    return '${point.latitude.toStringAsFixed(5)}, '
+        '${point.longitude.toStringAsFixed(5)}';
+  }
 }

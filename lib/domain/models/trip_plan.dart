@@ -144,6 +144,16 @@ class TripPlan {
   GeoPoint get origin => legs.first.start;
   GeoPoint get destination => legs.last.end;
 
+  /// Copia con nombres de extremos reemplazados (p.ej. por el lugar
+  /// geocodificado del origen/destino). Geometría e id se conservan: la ruta
+  /// es la misma, solo cambia cómo se etiqueta.
+  TripPlan copyWith({String? originName, String? destinationName}) => TripPlan(
+    id: id,
+    originName: originName ?? this.originName,
+    destinationName: destinationName ?? this.destinationName,
+    legs: legs,
+  );
+
   double get totalFareDop =>
       legs.fold<double>(0, (sum, leg) => sum + leg.fareDop);
 

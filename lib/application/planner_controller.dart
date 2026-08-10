@@ -55,6 +55,8 @@ class PlannerController extends Notifier<PlannerState> {
     required GeoPoint origin,
     required GeoPoint destination,
     bool overrideMaxWalk = false,
+    String? originName,
+    String? destinationName,
   }) async {
     final int requestId = ++_requestId;
     state = const PlannerState(isComputing: true);
@@ -82,7 +84,10 @@ class PlannerController extends Notifier<PlannerState> {
         );
         await minVisible;
         if (requestId != _requestId) return;
-        state = PlannerState(plan: outcome.plan, failure: outcome.failure);
+        state = PlannerState(
+          plan: _applyNames(outcome.plan, originName, destinationName),
+          failure: outcome.failure,
+        );
         return;
       }
 
@@ -118,13 +123,31 @@ class PlannerController extends Notifier<PlannerState> {
           ),
         );
       }
-      state = PlannerState(plan: outcome.plan, failure: outcome.failure);
+      state = PlannerState(
+        plan: _applyNames(outcome.plan, originName, destinationName),
+        failure: outcome.failure,
+      );
     } catch (_) {
       // Firestore sin conexión, índice pendiente, etc.: se muestra como un
       // fallo genérico "no se encontró una ruta" en lugar de crashear.
       if (requestId != _requestId) return;
       state = const PlannerState(failure: RoutePlanFailure.noRoute);
     }
+  }
+
+  /// Reemplaza las etiquetas del plan por los nombres geocodificados cuando se
+  /// conocen. `null` deja el nombre que puso el motor ("Cerca de {estación}").
+  TripPlan? _applyNames(
+    TripPlan? plan,
+    String? originName,
+    String? destinationName,
+  ) {
+    if (plan == null) return null;
+    if (originName == null && destinationName == null) return plan;
+    return plan.copyWith(
+      originName: originName ?? plan.originName,
+      destinationName: destinationName ?? plan.destinationName,
+    );
   }
 
   /// Cancela el cálculo en curso: se descarta el resultado pendiente y el

@@ -87,10 +87,10 @@ class LiveTripController extends StateNotifier<LiveTripState> {
           LiveTripState(
             plan: plan,
             status: TripStatus.idle,
-            // El simulador es el modo por defecto a propósito: en un emulador o
-            // en el navegador el GPS no se mueve, y arrancar en "GPS real"
-            // dejaría la pantalla congelada sin explicación.
-            mode: LocationMode.simulated,
+            // El GPS real es el modo por defecto: el marcador sigue al teléfono.
+            // El modo demo se activa explícitamente desde la pantalla del viaje
+            // (botón "Hacer viaje en modo demo") para emuladores/navegador.
+            mode: LocationMode.device,
           ),
         );
 

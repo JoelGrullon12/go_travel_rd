@@ -5,6 +5,13 @@ class UserRoute {
   final String name;
   final GeoPoint startLocation;
   final GeoPoint finishLocation;
+
+  /// Nombres geocodificados (calle/establecimiento) de los extremos, para
+  /// mostrarlos en el listado de favoritos sin re-consultar al geocoder.
+  /// Vacíos en rutas guardadas antes de esta versión → la UI cae a
+  /// coordenadas.
+  final String startName;
+  final String finishName;
   final String preferredTransportTypeId;
 
   const UserRoute({
@@ -12,6 +19,8 @@ class UserRoute {
     required this.name,
     required this.startLocation,
     required this.finishLocation,
+    this.startName = '',
+    this.finishName = '',
     required this.preferredTransportTypeId,
   });
 
@@ -28,6 +37,8 @@ class UserRoute {
             map['startLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
         finishLocation:
             map['finishLocation'] as GeoPoint? ?? const GeoPoint(0, 0),
+        startName: map['startName'] as String? ?? '',
+        finishName: map['finishName'] as String? ?? '',
         preferredTransportTypeId:
             map['preferredTransportTypeId'] as String? ?? '',
       );
@@ -36,6 +47,8 @@ class UserRoute {
         'name': name,
         'startLocation': startLocation,
         'finishLocation': finishLocation,
+        'startName': startName,
+        'finishName': finishName,
         'preferredTransportTypeId': preferredTransportTypeId,
       };
 
@@ -43,6 +56,8 @@ class UserRoute {
     String? name,
     GeoPoint? startLocation,
     GeoPoint? finishLocation,
+    String? startName,
+    String? finishName,
     String? preferredTransportTypeId,
   }) =>
       UserRoute(
@@ -50,6 +65,8 @@ class UserRoute {
         name: name ?? this.name,
         startLocation: startLocation ?? this.startLocation,
         finishLocation: finishLocation ?? this.finishLocation,
+        startName: startName ?? this.startName,
+        finishName: finishName ?? this.finishName,
         preferredTransportTypeId:
             preferredTransportTypeId ?? this.preferredTransportTypeId,
       );

@@ -52,6 +52,7 @@ dependencies:
 
   # Formato de fechas/horas en es-DO ("3:42 p. m."). Usado por core/utils/formatters.dart.
   intl: ^0.20.2
+  geocoding: ^5.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

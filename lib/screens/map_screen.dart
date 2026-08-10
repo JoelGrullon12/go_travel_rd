@@ -20,6 +20,7 @@ import '../models/station.dart';
 import '../models/user_route.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
+import '../services/geocoding_service.dart';
 import '../services/station_service.dart';
 import '../services/user_route_service.dart';
 import '../widgets/search_box.dart';
@@ -85,6 +86,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   final _authService = AuthService();
   final _locationService = LocationService();
   final _stationService = StationService();
+  final _geocodingService = GeocodingService();
 
   // ---------------------------------------------------------------------
   // Constantes / fallback
@@ -112,6 +114,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   /// Evita animar la cámara hacia la ubicación más de una vez al inicio.
   bool _cameraCenteredOnStart = false;
+
+  /// `true` una vez que el permiso de ubicación está concedido. Gatea
+  /// `GoogleMap.myLocationEnabled`: la capa nativa del punto azul solo se
+  /// habilita si el permiso ya existe cuando se crea/actualiza el mapa
+  /// (flutter/flutter#93376). Al voltear el flag tras conceder el permiso,
+  /// el plugin re-activa la capa y aparece el punto + círculo de precisión
+  /// sin reiniciar la app.
+  bool _locationPermissionGranted = false;
 
   final TextEditingController _originController = TextEditingController();
   final TextEditingController _destinationController = TextEditingController();
@@ -169,9 +179,28 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   /// reconstruir todo el mapa en cada frame del gesto de cámara.
   final ValueNotifier<LatLng?> _cameraTarget = ValueNotifier<LatLng?>(null);
 
+  /// Nombre del lugar (calle/establecimiento) bajo el pin. Se consulta al
+  /// soltar el mapa ([_reverseGeocodeCameraCenter]) y la barra lo muestra en
+  /// lugar de las coordenadas. `null` mientras no hay resultado.
+  final ValueNotifier<String?> _cameraPlaceName = ValueNotifier<String?>(null);
+
+  /// Token anti-race de la geocodificación: si el usuario vuelve a mover el
+  /// mapa, solo el resultado más reciente se publica en [_cameraPlaceName].
+  int _geocodeToken = 0;
+
+  /// Nombres de lugar ya resueltos, keyed por coordenadas redondeadas. Evita
+  /// re-consultar al geocoder al panear de vuelta sobre un punto conocido.
+  final Map<String, String> _placeNameCache = <String, String>{};
+
   /// Puntos ya confirmados (se pasan al motor en [MapPickerMode.destination]).
   LatLng? _pickerOriginPoint;
   LatLng? _pickerDestinationPoint;
+
+  /// Nombres geocodificados de los puntos confirmados. Se pasan al motor para
+  /// que el plan los muestre en la barra de inicio/fin y se guarden en la ruta
+  /// personalizada.
+  String? _pickerOriginName;
+  String? _pickerDestinationName;
 
   /// `true` una vez que el motor calculó un plan desde esta pantalla. Se usa
   /// para que el botón atrás vuelva a la planificación en vez de salir, sin
@@ -212,9 +241,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           LatLng(saved.startLocation.latitude, saved.startLocation.longitude);
       _pickerDestinationPoint =
           LatLng(saved.finishLocation.latitude, saved.finishLocation.longitude);
-      origin = _coordinateLabel(_pickerOriginPoint!);
+      // Se conservan los nombres geocodificados guardados con la ruta.
+      _pickerOriginName = saved.startName;
+      _pickerDestinationName = saved.finishName;
+      origin = _pointLabel(_pickerOriginPoint!, saved.startName);
       _originController.text = origin;
-      destination = _coordinateLabel(_pickerDestinationPoint!);
+      destination = _pointLabel(_pickerDestinationPoint!, saved.finishName);
       _destinationController.text = destination;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _computeRoute();
@@ -237,6 +269,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _originController.dispose();
     _destinationController.dispose();
     _cameraTarget.dispose();
+    _cameraPlaceName.dispose();
     _mapController?.dispose();
     super.dispose();
   }
@@ -247,7 +280,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   Future<void> _startLocationTracking() async {
     final granted = await _locationService.requestLocationPermission();
-    if (!mounted || !granted) return;
+    if (!mounted) return;
+    if (granted) {
+      // Permite que la capa nativa del punto azul se active tras conceder
+      // el permiso (ver [_locationPermissionGranted]).
+      setState(() => _locationPermissionGranted = true);
+    } else {
+      return;
+    }
 
     _positionSubscription = _locationService.getPositionStream().listen(
       _onPositionUpdate,
@@ -306,6 +346,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Future<void> _onCameraIdle() async {
     final GoogleMapController? controller = _mapController;
     if (controller == null) return;
+
+    // En modo pin, el nombre del lugar bajo el marcador se resuelve al soltar
+    // el mapa. Corre en paralelo con la consulta de estaciones (ambas son I/O
+    // asíncronas que no bloquean al hilo de UI ni se esperan la una a la otra).
+    if (_pickerMode != null) _reverseGeocodeCameraCenter();
 
     // Con un plan activo el mapa muestra la ruta, no el catálogo de estaciones.
     if (_activePlan != null) {
@@ -678,6 +723,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       name: name,
       startLocation: GeoPoint(plan.origin.lat, plan.origin.lng),
       finishLocation: GeoPoint(plan.destination.lat, plan.destination.lng),
+      // Los nombres geocodificados viajan con la ruta para mostrarlos en el
+      // listado de favoritos (HomeScreen) sin re-consultar al geocoder.
+      startName: plan.originName,
+      finishName: plan.destinationName,
       preferredTransportTypeId: _preferredTransportTypeId(plan),
     );
 
@@ -712,6 +761,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final LatLng tmp = _pickerOriginPoint!;
     _pickerOriginPoint = _pickerDestinationPoint;
     _pickerDestinationPoint = tmp;
+
+    final String? tmpName = _pickerOriginName;
+    _pickerOriginName = _pickerDestinationName;
+    _pickerDestinationName = tmpName;
 
     final String tmpText = origin;
     origin = destination;
@@ -846,7 +899,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (_pickerMode == MapPickerMode.origin) {
       setState(() {
         _pickerOriginPoint = target;
-        _originController.text = _coordinateLabel(target);
+        _pickerOriginName = _cameraPlaceName.value;
+        _originController.text =
+            _pointLabel(target, _cameraPlaceName.value);
         _markers.removeWhere(
           (m) => m.markerId == const MarkerId('picker-origin'),
         );
@@ -877,7 +932,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     setState(() {
       _pickerDestinationPoint = target;
-      _destinationController.text = _coordinateLabel(target);
+      _pickerDestinationName = _cameraPlaceName.value;
+      _destinationController.text =
+          _pointLabel(target, _cameraPlaceName.value);
       _markers.removeWhere(
         (m) => m.markerId == const MarkerId('picker-destination'),
       );
@@ -909,6 +966,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         .plan(
           origin: originLatLng.toGeoPoint,
           destination: destinationLatLng.toGeoPoint,
+          originName: _pickerOriginName,
+          destinationName: _pickerDestinationName,
         );
   }
 
@@ -990,6 +1049,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           origin: originLatLng.toGeoPoint,
           destination: destinationLatLng.toGeoPoint,
           overrideMaxWalk: true,
+          originName: _pickerOriginName,
+          destinationName: _pickerDestinationName,
         );
   }
 
@@ -997,6 +1058,47 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   /// más exacta que se le puede dar al punto confirmado.
   String _coordinateLabel(LatLng point) =>
       '${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}';
+
+  /// Nombre de un punto: el lugar geocodificado si se conoce, o las
+  /// coordenadas como fallback.
+  String _pointLabel(LatLng point, String? placeName) {
+    if (placeName != null && placeName.trim().isNotEmpty) return placeName;
+    return _coordinateLabel(point);
+  }
+
+  /// Clave de cache de un punto: coordenadas redondeadas a ~5 dígitos
+  /// (~1 m). Dos puntos con la misma clave comparten el nombre.
+  static String _placeKey(LatLng point) =>
+      '${point.latitude.toStringAsFixed(5)},${point.longitude.toStringAsFixed(5)}';
+
+  /// Resuelve el nombre del lugar bajo el pin. Se dispara en `onCameraIdle`,
+  /// en paralelo con la consulta de estaciones; el resultado se publica en
+  /// [_cameraPlaceName] solo si sigue siendo el gesto más reciente.
+  ///
+  /// Si el geocoder falla (red, límite de llamadas), la barra cae a las
+  /// coordenadas como fallback y el punto se reintentará en el próximo
+  /// `onCameraIdle` (los fallos no se cachean).
+  Future<void> _reverseGeocodeCameraCenter() async {
+    final LatLng? target = _cameraTarget.value;
+    if (target == null) return;
+
+    final String key = _placeKey(target);
+    final String? cached = _placeNameCache[key];
+    if (cached != null) {
+      if (_cameraPlaceName.value != cached) _cameraPlaceName.value = cached;
+      return;
+    }
+
+    final int request = ++_geocodeToken;
+    final String? name = await _geocodingService.placeNameFor(
+      target.latitude,
+      target.longitude,
+    );
+    if (request != _geocodeToken) return; // el mapa ya se movió otra vez
+    if (name != null) _placeNameCache[key] = name;
+    if (!mounted) return;
+    _cameraPlaceName.value = name ?? _coordinateLabel(target);
+  }
 
   Future<void> _onLocationButtonPressed() async {
     final current = _currentLocation;
@@ -1010,7 +1112,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     if (position != null) {
       final latLng = LatLng(position.latitude, position.longitude);
-      setState(() => _currentLocation = latLng);
+      setState(() {
+        _currentLocation = latLng;
+        // El permiso pudo concederse aquí (caso "denegó al inicio y luego
+        // concede desde el FAB") — activar la capa nativa del punto azul.
+        _locationPermissionGranted = true;
+      });
       _mapController?.animateCamera(CameraUpdate.newLatLngZoom(latLng, 16));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1083,7 +1190,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               style: kDarkMapStyle,
               markers: _markers,
               polylines: _polylines,
-              myLocationEnabled: true,
+              myLocationEnabled: _locationPermissionGranted,
               myLocationButtonEnabled: false,
               zoomControlsEnabled: false,
               onMapCreated: (controller) {
@@ -1175,7 +1282,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                     ),
                     _PickPointBar(
                       mode: _pickerMode!,
-                      coordinates: _cameraTarget,
+                      placeName: _cameraPlaceName,
                       onConfirm: _confirmPick,
                     ),
                   ],
@@ -1234,6 +1341,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       _clearActivePlanState();
       _pickerMode = MapPickerMode.origin;
       _pickerOriginPoint = null;
+      _pickerOriginName = null;
+      _cameraPlaceName.value = null;
       _originController.clear();
       _markers.removeWhere(
         (m) => m.markerId == const MarkerId('picker-origin'),
@@ -1248,6 +1357,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       _clearActivePlanState();
       _pickerMode = MapPickerMode.destination;
       _pickerDestinationPoint = null;
+      _pickerDestinationName = null;
+      _cameraPlaceName.value = null;
       _destinationController.clear();
       _markers.removeWhere(
         (m) => m.markerId == const MarkerId('picker-destination'),
@@ -1283,6 +1394,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       _clearActivePlanState();
       _pickerMode = MapPickerMode.destination;
       _pickerDestinationPoint = null;
+      _pickerDestinationName = null;
+      _cameraPlaceName.value = null;
       _destinationController.clear();
       _markers.removeWhere(
         (m) => m.markerId == const MarkerId('picker-destination'),
@@ -1340,12 +1453,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 class _PickPointBar extends StatelessWidget {
   const _PickPointBar({
     required this.mode,
-    required this.coordinates,
+    required this.placeName,
     required this.onConfirm,
   });
 
   final MapPickerMode mode;
-  final ValueNotifier<LatLng?> coordinates;
+  final ValueNotifier<String?> placeName;
   final VoidCallback onConfirm;
 
   @override
@@ -1383,18 +1496,26 @@ class _PickPointBar extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 4),
-            ValueListenableBuilder<LatLng?>(
-              valueListenable: coordinates,
-              builder: (BuildContext context, LatLng? target, Widget? _) {
-                if (target == null) return const SizedBox.shrink();
+            // Nombre del lugar bajo el pin (calle/establecimiento), resuelto al
+            // soltar el mapa. Mientras se consulta, un texto neutro; si el
+            // geocoder falla, la barra muestra las coordenadas como fallback.
+            ValueListenableBuilder<String?>(
+              valueListenable: placeName,
+              builder: (BuildContext context, String? name, Widget? _) {
+                if (name != null) {
+                  return Text(
+                    name,
+                    style: text.bodyMedium?.copyWith(
+                      color: AppColors.textPrimary,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  );
+                }
                 return Text(
-                  '${target.latitude.toStringAsFixed(5)}, '
-                  '${target.longitude.toStringAsFixed(5)}',
+                  'Buscando la ubicación…',
                   style: text.bodyMedium?.copyWith(
                     color: AppColors.textSecondary,
-                    fontFeatures: const <FontFeature>[
-                      FontFeature.tabularFigures(),
-                    ],
                   ),
                 );
               },
