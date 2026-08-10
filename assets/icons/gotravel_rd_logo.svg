@@ -1,0 +1,37 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Fondo blanco -->
+  <rect width="512" height="512" rx="112" fill="#FFFFFF"/>
+  <rect x="8" y="8" width="496" height="496" rx="104" fill="none" stroke="#0F5F4C" stroke-width="10"/>
+
+  <!-- Ruta -->
+  <path d="M 100 300
+           C 150 300, 150 240, 200 240
+           C 250 240, 250 190, 300 180"
+        fill="none" stroke="#0F5F4C" stroke-width="10" stroke-linecap="round"/>
+
+  <!-- Punto de partida: rojo -->
+  <circle cx="100" cy="300" r="16" fill="#E53E3E"/>
+
+  <!-- Puntos intermedios (paradas): negros -->
+  <circle cx="150" cy="270" r="8" fill="#111111"/>
+  <circle cx="200" cy="240" r="8" fill="#111111"/>
+  <circle cx="250" cy="200" r="8" fill="#111111"/>
+
+  <!-- Pin de destino: verde oscuro (dim) -->
+  <g>
+    <path d="M340 118
+             c-46 0 -83 37 -83 83
+             c0 62 83 151 83 151
+             s83 -89 83 -151
+             c0 -46 -37 -83 -83 -83 Z"
+          fill="#0F5F4C"/>
+    <circle cx="340" cy="201" r="32" fill="#FFFFFF"/>
+    <circle cx="340" cy="201" r="14" fill="#23D3A5"/>
+  </g>
+
+  <!-- Nombre debajo -->
+  <text x="256" y="420" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+        font-weight="800" font-size="70" letter-spacing="1" fill="#0F5F4C">GoTravel</text>
+  <text x="256" y="460" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+        font-weight="600" font-size="32" letter-spacing="10" fill="#111111" opacity="0.75">RD</text>
+</svg>
