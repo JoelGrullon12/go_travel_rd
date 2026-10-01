@@ -49,3 +49,7 @@ AGENTS.md
 
 # API key de Maps para web (ver web/maps_config.example.js)
 web/maps_config.js
+
+# Copias viejas de configs de Firebase — nunca deben subirse.
+google-services.old.json
+*.old.json

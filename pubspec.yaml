@@ -1,5 +1,5 @@
 name: go_travel_rd
-description: "A new Flutter project."
+description: "GoTravel RD — app de transporte público para República Dominicana: rutas entre paradas reales del Metro y la OMSA, mapa interactivo y seguimiento del viaje en vivo."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

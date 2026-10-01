@@ -1,11 +1,11 @@
 {
-    "name": "go_travel_rd",
-    "short_name": "go_travel_rd",
+    "name": "GoTravel RD",
+    "short_name": "GoTravel RD",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#080B14",
+    "theme_color": "#080B14",
+    "description": "Rutas entre paradas reales del Metro y la OMSA, mapa interactivo y seguimiento del viaje en vivo.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
