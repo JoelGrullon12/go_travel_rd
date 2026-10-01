@@ -1,145 +1,147 @@
 # GoTravel RD
 
-**App móvil de transporte público para República Dominicana.** Calcula la mejor ruta entre paradas reales del Metro y la OMSA, la muestra en un mapa interactivo y guía al usuario en vivo durante el viaje con instrucciones de navegación y hora de llegada estimada (ETA).
+English | [Español](README.es.md)
 
-Proyecto académico universitario. Interfaz en español (es-DO), tema oscuro y soporte de Android e iOS.
+**Public transit app for the Dominican Republic.** It computes the best route between real Metro and OMSA stops, shows it on an interactive map, and guides you live during the trip with turn-by-turn instructions and an estimated arrival time (ETA).
+
+University academic project. Spanish (es-DO) interface, dark theme, and support for Android and iOS.
 
 ---
 
-## Funcionalidades
+## Features
 
-- **Mapa interactivo** — Google Maps con las 490 paradas reales del Metro y la OMSA de Santo Domingo, con marcadores por tipo de transporte y polilínea de la ruta calculada.
-- **Motor de rutas A→B (propio)** — Dijkstra multi-fuente en Dart puro sobre un grafo construido desde Firestore. Soporta transbordos, EAEs en Metro (Juan Pablo Duarte L1↔L2) y la preferencia de transporte del usuario.
-- **Distancia máxima caminable** — configurable por el usuario (por defecto 1.5 km), con override autorizado en dos fases hasta 5 km.
-- **Viaje en vivo** — seguimiento del GPS con *route matching* sobre la ruta, instrucciones paso a paso, barra de progreso y ETA recalculada en tiempo real.
-- **Favoritos** — rutas y tipos de transporte guardados, con renombrar y eliminar.
-- **Historial de viajes** — registro automático de los viajes iniciados, con fecha, costo y distancia.
-- **Autenticación** — correo/contraseña y Google Sign-In (Firebase Auth).
-- **Preferencias** — distancia máxima a pie y tipos de transporte favoritos, persistidas por usuario.
-- **Extras** — geocodificación inversa bajo el pin, tema oscuro, localización es-DO, opción borde a borde (Android 15+).
+- **Interactive map** — Google Maps with the 490 real Metro and OMSA stops in Santo Domingo, with per-transport-type markers and a polyline for the computed route.
+- **A→B routing engine (built from scratch)** — Multi-source Dijkstra in pure Dart over a graph built from Firestore. It supports transfers, in-station transfers (e.g. Juan Pablo Duarte L1↔L2) and the user's preferred transport mode.
+- **Maximum walking distance** — user-configurable (1.5 km by default), with a two-phase override that allows up to 5 km.
+- **Live trip** — GPS tracking with *route matching* against the route, step-by-step instructions, a progress bar and an ETA recomputed in real time.
+- **Favorites** — saved routes and transport types, with rename and delete.
+- **Trip history** — trips are recorded automatically, with date, cost and distance.
+- **Authentication** — email/password and Google Sign-In (Firebase Auth).
+- **Preferences** — maximum walking distance and favorite transport types, persisted per user.
+- **Extras** — reverse geocoding under the pin, dark theme, es-DO localization, edge-to-edge support (Android 15+).
 
-## Tecnologías
+## Tech stack
 
-| Área | Tecnología |
+| Area | Technology |
 |---|---|
 | Framework | **Flutter 3.44** / **Dart ^3.12** |
-| Estado | **Riverpod 2** (providers + controladores) |
-| Mapas | **google_maps_flutter**, **geocoding** |
-| Ubicación | **geolocator**, **permission_handler** |
+| State management | **Riverpod 2** (providers + controllers) |
+| Maps | **google_maps_flutter**, **geocoding** |
+| Location | **geolocator**, **permission_handler** |
 | Backend | **Firebase** — Firestore + Auth (`cloud_firestore`, `firebase_auth`, `google_sign_in`) |
-| Cálculo en background | `compute()` (isolate separado) |
-| i18n / formatos | `flutter_localizations`, `intl` (es, es-DO) |
+| Background compute | `compute()` (separate isolate) |
+| i18n / formatting | `flutter_localizations`, `intl` (es, es-DO) |
 | Testing | `flutter_test`, `flutter_lints` |
 
-## Requisitos previos
+## Prerequisites
 
-- **Flutter SDK 3.44+** (estable) con Dart 3.12+.
+- **Flutter SDK 3.44+** (stable) with Dart 3.12+.
 - **Android**: Android Studio + Android SDK + JDK 17.
-- **iOS** (opcional): macOS con Xcode y CocoaPods.
-- **Cuenta de Firebase** con un proyecto propio (Firestore en modo producción y Authentication habilitada para email/Google).
+- **iOS** (optional): macOS with Xcode and CocoaPods.
+- **Firebase account** with your own project (Firestore in production mode and Authentication enabled for email/Google).
 
-## Cómo ejecutarlo
+## Getting started
 
-### 1. Dependencias
+### 1. Dependencies
 
 ```bash
 flutter pub get
 ```
 
-### 2. Crear los archivos de configuración local
+### 2. Create the local config files
 
-Estos archivos **no se versionan** (están en `.gitignore`); créalos a mano:
+These files are **not versioned** (they are in `.gitignore`); create them by hand:
 
 **a) Android — `android/local.properties`**
 
 ```properties
-sdk.dir=/ruta/a/tu/Android/Sdk
-MAPS_API_KEY=tu_api_key_de_Maps_SDK_for_Android
+sdk.dir=/path/to/your/Android/Sdk
+MAPS_API_KEY=your_Maps_SDK_for_Android_api_key
 ```
 
-**b) Web (opcional, para `flutter run -d chrome`) — `web/maps_config.js`**
+**b) Web (optional, for `flutter run -d chrome`) — `web/maps_config.js`**
 
-Copia la plantilla y pega tu key:
+Copy the template and paste your key:
 
 ```bash
 cp web/maps_config.example.js web/maps_config.js
 ```
 
-> La key de web es del producto **Maps JavaScript API** (distinto del *Maps SDK for Android*) y debe restringirse por referente HTTP (`http://localhost:*`).
+> The web key belongs to the **Maps JavaScript API** product (different from the *Maps SDK for Android*) and must be restricted by HTTP referrer (`http://localhost:*`).
 
-**c) iOS (opcional) — `GOOGLE_MAPS_API_KEY`**
+**c) iOS (optional) — `GOOGLE_MAPS_API_KEY`**
 
-Edítalo en `ios/Flutter/Release.xcconfig` (y `Debug.xcconfig`). ⚠️ Ese archivo **está versionado**: si vas a poner una key real, muévela a un `ios/Flutter/Secrets.xcconfig` ignorado por git e `#include`alo desde los `.xcconfig` de Flutter.
+Edit it in `ios/Flutter/Release.xcconfig` (and `Debug.xcconfig`). ⚠️ That file **is versioned**: if you are going to put a real key there, move it to a git-ignored `ios/Flutter/Secrets.xcconfig` and `#include` it from the Flutter `.xcconfig` files.
 
 ### 3. Firebase
 
-- `android/app/google-services.json` y `lib/firebase_options.dart` ya vienen incluidos para el proyecto de ejemplo. Para usar **tu propio** proyecto, regenera la config con:
+- `android/app/google-services.json` and `lib/firebase_options.dart` are already included for the sample project. To use **your own** project, regenerate the config with:
   ```bash
   dart pub global activate flutterfire_cli
   flutterfire configure
   ```
-- Las colecciones esperadas son `routes` (14 documentos), `stations` (490) y `users`.
+- The expected collections are `routes` (14 documents), `stations` (490) and `users`.
 
-### 4. Correr
+### 4. Run
 
 ```bash
 flutter run                 # Android/iOS
-flutter run -d chrome       # web (requiere web/maps_config.js)
+flutter run -d chrome       # web (requires web/maps_config.js)
 ```
 
-### 5. Pruebas
+### 5. Tests
 
 ```bash
-flutter analyze   # sin issues
+flutter analyze   # no issues
 flutter test      # 122 tests
 ```
 
-## Estructura del proyecto
+## Project structure
 
 ```
 lib/
-  application/   # Riverpod: providers y controladores (planner, live trip)
-  core/          # tema oscuro (AppTheme/AppColors), formatters, motion
-  data/          # datos estáticos del PoC (metro_stations)
-  domain/        # lógica pura sin Flutter, testeable sin dispositivo
-    geo/         # GeoPoint y distancias (Haversine)
-    models/      # TripPlan, TripProgress, instrucciones, modos de transporte
-    routing/     # motor A→B (station_graph, route_engine)
-    tracking/    # TripTracker, ETA, route matcher, geometría
+  application/   # Riverpod: providers and controllers (planner, live trip)
+  core/          # dark theme (AppTheme/AppColors), formatters, motion
+  data/          # static PoC data (metro_stations)
+  domain/        # pure logic with no Flutter dependency, testable without a device
+    geo/         # GeoPoint and distances (Haversine)
+    models/      # TripPlan, TripProgress, instructions, transport modes
+    routing/     # A→B engine (station_graph, route_engine)
+    tracking/    # TripTracker, ETA, route matcher, geometry
   features/
-    live_trip/   # pantalla de viaje activo + widgets
-    shared/      # puente dominio→UI (iconos, colores)
+    live_trip/   # active trip screen + widgets
+    shared/      # domain→UI bridge (icons, colors)
   models/        # AppUser, Station, Route, TripHistoryEntry
   screens/       # main_shell, home, map, profile, login, trip_history
-  services/      # auth, firestore, estaciones, rutas, geocoding, user_route
+  services/      # auth, firestore, stations, routes, geocoding, user_route
   widgets/       # search_box
 ```
 
-La capa `domain/` no depende de Flutter ni de Firebase: el motor de rutas y el tracker se prueban como lógica pura.
+The `domain/` layer depends on neither Flutter nor Firebase: the routing engine and the tracker are tested as pure logic.
 
-## Datos
+## Data
 
-- Las paradas y rutas se cargan a Firestore con un **script de importación aparte** (Node.js + `firebase-admin`), no desde la app. Ese script usa el Admin SDK, que ignora las Security Rules.
-- Fuentes: Metro (39 estaciones) y corredores troncales de la OMSA (Kennedy, 27 de Febrero, Charles de Gaulle), con datos de INTRANT.
-- ⚠️ **Las tarifas y frecuencias son estimaciones del equipo**, no datos oficiales de INTRANT/Metro/OMSA.
+- Stops and routes are loaded into Firestore with a **separate import script** (Node.js + `firebase-admin`), not from the app. That script uses the Admin SDK, which bypasses the Security Rules.
+- Sources: Metro (39 stations) and OMSA trunk corridors (Kennedy, 27 de Febrero, Charles de Gaulle), with data from INTRANT.
+- ⚠️ **Fares and frequencies are team estimates**, not official data from INTRANT/Metro/OMSA.
 
-## Seguridad y claves
+## Security and keys
 
-Las API keys de Firebase de este repo son **claves de cliente** por diseño (viajan dentro del APK de todas formas); la protección de los datos está en las **Firestore Security Rules** (`firestore.rules`):
+The Firebase API keys in this repo are **client keys** by design (they ship inside the APK regardless); data protection lives in the **Firestore Security Rules** (`firestore.rules`):
 
-- `routes` y `stations`: lectura pública, **escritura bloqueada** (solo el Admin SDK escribe).
-- `users/{uid}` y `users/{uid}/favorites/*`: lectura/escritura solo por el propietario (`request.auth.uid == uid`).
+- `routes` and `stations`: public read, **writes blocked** (only the Admin SDK writes).
+- `users/{uid}` and `users/{uid}/favorites/*`: read/write only for the owner (`request.auth.uid == uid`).
 
-Para un despliegue propio, **restringe cada API key** en Google Cloud Console:
+For your own deployment, **restrict each API key** in the Google Cloud Console:
 
-| Key | Restringir por |
+| Key | Restrict by |
 |---|---|
-| Android (`google-services.json`) | Android apps → package `com.unapec.gotravelrd` + SHA-1 del keystore |
-| Web (`firebase_options.dart`) | Referentes HTTP (dominio / `localhost`) |
+| Android (`google-services.json`) | Android apps → package `com.unapec.gotravelrd` + keystore SHA-1 |
+| Web (`firebase_options.dart`) | HTTP referrers (domain / `localhost`) |
 | iOS (`firebase_options.dart`) | iOS apps → bundle ID |
 
-Nunca subas `android/local.properties`, `web/maps_config.js` ni un keystore — ya están ignorados por `.gitignore`.
+Never commit `android/local.properties`, `web/maps_config.js` or a keystore — they are already ignored by `.gitignore`.
 
-## Licencia
+## License
 
-Proyecto académico, sin licencia explícita. Todo el código es propiedad de sus autores y se comparte con fines educativos.
+Academic project, with no explicit license. All code is owned by its authors and is shared for educational purposes.
